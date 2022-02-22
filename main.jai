@@ -1,11 +1,11 @@
 #import "Basic";
-#import "Time";
 #import "glfw"; // GLFW for handling windows with the OS
 #import "GL";   // OpenGL
 File :: #import "File"; // for reading files
 Math :: #import "Math"; // for lerp mostly
 
 #load "math.jai"; // my simple math library
+#load "util.jai"; // timer code so far
 
 lerp :: Math.lerp;
 
@@ -219,10 +219,28 @@ main :: () {
   }
   
   // render loop
-  nframes := 0;
+  nframes : s64 = 0;
+  time_sample_rate : s64 : 10;
+  timer, total_timer : Timer;
+  start_timer(*timer);
+  start_timer(*total_timer);
   while !glfwWindowShouldClose(window) {
     // HANDLE INPUT
     defer nframes += 1;
+    if nframes % time_sample_rate == 0 {
+      stop_timer(*timer);
+      defer start_timer(*timer);
+
+      dt : float = get_seconds(*timer);
+      framerate := cast(float) time_sample_rate / dt; // fps
+      if nframes % (time_sample_rate*time_sample_rate) == 0
+        print("% fps\n", cast(u32)framerate);
+
+      stop_timer(*total_timer); // don't start total_timer again
+      ftime : float = get_seconds(*total_timer); // in seconds;
+      set_uniform(program, "t",  ftime);
+    }
+
     glfwPollEvents(); // replace with something real please
 
     // SIMULATE
@@ -233,10 +251,6 @@ main :: () {
     width, height : s32;
     glfwGetFramebufferSize(window, *width, *height);
     glViewport(0, 0, xx width, xx height);
-
-    framerate := 1;
-    time := cast(float) nframes / cast(float)framerate;
-    set_uniform(program, "t",  time);
 
     // draw to backbuffer
     glClear(GL_COLOR_BUFFER_BIT);

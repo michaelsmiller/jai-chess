@@ -18,7 +18,7 @@ uniform vec3  borderColor; // defaults to black
 uniform ivec2 squareDim = ivec2(8, 8);
 
 uniform float t = 0.;
-uniform float period = 400.; // doesn't need to be set by the code
+uniform float period = 3; // in seconds
 
 // gl_FragColor might be specific to 1.40...?
 void main() {
