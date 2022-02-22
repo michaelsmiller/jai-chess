@@ -3,7 +3,6 @@
 // @note: need version 3.30 for layout syntax, so order matters here
 in vec2 pos;
 in vec2 vertTexCoords; // for passing to fragment shader
-in int isWhite; // used as a boolean
 in ivec2 vSquareIndex;
 
 out vec3 vertColor;
@@ -20,6 +19,8 @@ void main() {
 
   texCoords = vertTexCoords;
   squareIndex = vSquareIndex;
+
+  int isWhite = (int(squareIndex.x%2==0) ^ int(squareIndex.y%2==0)); // 0 or 1
   if (isWhite == 0)
     vertColor = vec3(whiteColor.r, whiteColor.g, whiteColor.b);
   else

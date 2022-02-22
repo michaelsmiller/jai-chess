@@ -1,6 +1,8 @@
 // #version 300 es
 #version 140
 
+#define PI 3.1415926538;
+
 precision mediump int;
 precision mediump float;
 
@@ -14,6 +16,9 @@ uniform float borderWidth; // units are in square widths
 uniform vec3  borderColor; // defaults to black
 
 uniform ivec2 squareDim = ivec2(8, 8);
+
+uniform float t = 0.;
+uniform float period = 400.; // doesn't need to be set by the code
 
 // gl_FragColor might be specific to 1.40...?
 void main() {
@@ -32,4 +37,16 @@ void main() {
   else
     gl_FragColor.rgb = vertColor;
 
+  // everything below is to play with dynamism
+  float red = gl_FragColor.r;
+  float dr = 1. - red;
+  if (red > dr)
+    dr = -red;
+
+  float inv_period = 1. / period;
+  float angle = 2. * PI;
+  angle *= t * inv_period;
+  float addition = dr * sin(angle);
+  red = red + 0.2 * addition;
+  gl_FragColor.r = clamp(red, 0., 1.);
 }

@@ -1,11 +1,14 @@
 #import "Basic";
-
+#import "Time";
 #import "glfw"; // GLFW for handling windows with the OS
 #import "GL";   // OpenGL
 File :: #import "File"; // for reading files
-Math :: #import "Math"; // for lerp
+Math :: #import "Math"; // for lerp mostly
 
-#load "math.jai"; // my math library
+#load "math.jai"; // my simple math library
+
+lerp :: Math.lerp;
+
 
 // constants
 vertex_shader_path   :: "board.vert";
@@ -90,9 +93,7 @@ main :: () {
   if !glfwInit() error("Failed to start GLFW...\n");
   print("Booted up GLFW!\n");
 
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-  window_size : Vector2(s32) = .{800, 800};
+  window_size :: Vector2(s32).{800, 800};
   window := glfwCreateWindow(window_size.x, window_size.y, "Chess", null, null);
   if !window error("Couldn't open window!");
 
@@ -108,17 +109,15 @@ main :: () {
   Vertex :: struct {
     x, y : float;        // coords
     tx, ty : float;      // texture coordinates
-    is_white : GLint;     // color of the square
     ix, iy : GLint;      // index of what square this is on
   }
 
-  make_vertex :: inline (x : float, y : float, tx : float, ty : float, is_white : GLint, ix : GLint, iy : GLint) -> Vertex {
+  make_vertex :: inline (x : float, y : float, tx : float, ty : float, ix : GLint, iy : GLint) -> Vertex {
     v : Vertex;
     v.x = x;
     v.y = y;
     v.tx = tx;
     v.ty = ty;
-    v.is_white = is_white;
     v.ix = ix;
     v.iy = iy;
     return v;
@@ -141,21 +140,18 @@ main :: () {
       y  := Math.lerp(-1., 1., yfrac);
       w  := 2 / cast(float) nsquares_width;
       h  := 2 / cast(float) nsquares_height;
-      color : GLint = cast(GLint) ifx ((i%2==0) ^ (j%2==0)) then 0 else 1;
-      other_color := ifx color == 0 then 1 else 0; // for fun :)
-
 
       ix := cast(GLint) i;
       iy := cast(GLint) (nsquares_height - j - 1); // flip y axis back for square indices
       // print("ix = %, iy = %\n", ix, iy);
       itri1 := ivert * 6;
       itri2 := ivert * 6 + 3;
-      vertices[itri1+0] = make_vertex(x  , y  , 0, 0, color, ix, iy); // first triangle
-      vertices[itri1+1] = make_vertex(x  , y+h, 0, 1, color, ix, iy);
-      vertices[itri1+2] = make_vertex(x+w, y+h, 1, 1, color, ix, iy);
-      vertices[itri2+0] = make_vertex(x+w, y+h, 1, 1, color, ix, iy); // second triangle
-      vertices[itri2+1] = make_vertex(x  , y  , 0, 0, color, ix, iy);
-      vertices[itri2+2] = make_vertex(x+w, y  , 1, 0, color, ix, iy);
+      vertices[itri1+0] = make_vertex(x  , y  , 0, 0, ix, iy); // first triangle
+      vertices[itri1+1] = make_vertex(x  , y+h, 0, 1, ix, iy);
+      vertices[itri1+2] = make_vertex(x+w, y+h, 1, 1, ix, iy);
+      vertices[itri2+0] = make_vertex(x+w, y+h, 1, 1, ix, iy); // second triangle
+      vertices[itri2+1] = make_vertex(x  , y  , 0, 0, ix, iy);
+      vertices[itri2+2] = make_vertex(x+w, y  , 1, 0, ix, iy);
     }
   }
 
@@ -191,7 +187,6 @@ main :: () {
       border_width :  float = 0.01; // units of square width
   }
   board_look : BoardShaderUniforms;
-  // board_look.border_color = 0.5*(board_look.black_color + board_look.white_color);
 
   // UNIFORMS
   {
@@ -200,6 +195,7 @@ main :: () {
     set_uniform(program, "borderColor", board_look.border_color);
     set_uniform(program, "borderWidth", board_look.border_width);
     set_uniform(program, "squareDim",   Vector2(s32).{nsquares_width, nsquares_height});
+    set_uniform(program, "t",  cast(float) 0.);
   }
 
   // ATTRIBUTES
@@ -215,31 +211,40 @@ main :: () {
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tx);
     // The color of the vertices
-    glEnableVertexAttribArray(2);
-    glVertexAttribIPointer(2, 1, GL_INT, vsize, cast(*void) *offset.is_white);
+    // glEnableVertexAttribArray(2);
+    // glVertexAttribIPointer(2, 1, GL_INT, vsize, cast(*void) *offset.is_white);
     // The indices of the square
-    glEnableVertexAttribArray(3);
-    glVertexAttribIPointer(3, 2, GL_INT, vsize, cast(*void) *offset.ix);
+    glEnableVertexAttribArray(2);
+    glVertexAttribIPointer(2, 2, GL_INT, vsize, cast(*void) *offset.ix);
   }
   
   // render loop
   nframes := 0;
   while !glfwWindowShouldClose(window) {
-    nframes += 1;
-    // if nframes % 100 == 0 && nframes > 0 print("On frame %\n", nframes);
+    // HANDLE INPUT
+    defer nframes += 1;
+    glfwPollEvents(); // replace with something real please
+
+    // SIMULATE
+    // @todo: make a board state and shit
+
+    
+    // GRAPHICS
     width, height : s32;
     glfwGetFramebufferSize(window, *width, *height);
     glViewport(0, 0, xx width, xx height);
 
-    glClear(GL_COLOR_BUFFER_BIT);
+    framerate := 1;
+    time := cast(float) nframes / cast(float)framerate;
+    set_uniform(program, "t",  time);
 
     // draw to backbuffer
+    glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(program); // program is a shading program, specifically
     glBindVertexArray(vao); // have to bind every frame before drawing
     glDrawArrays(GL_TRIANGLES, 0, vertices.count);
 
     glfwSwapBuffers(window);
-    glfwPollEvents();
     reset_temporary_storage(); // allows us to allocate temporary stuff without fear every frame
   }
 
