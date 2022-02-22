@@ -5,8 +5,10 @@
 File :: #import "File"; // for reading files
 Math :: #import "Math"; // for lerp
 
+#load "math.jai"; // my math library
+
 // constants
-vertex_shader_path :: "board.vert";
+vertex_shader_path   :: "board.vert";
 fragment_shader_path :: "board.frag";
 
 error :: (message : string, print_args : ..Any) {
@@ -36,7 +38,13 @@ set_uniform :: (program : GLuint, cname : *u8, value : $T) {
     error("location of uniform '%' not found. Might not be active.\n", name);
   }
 
-  #if T == float {
+  #if T == [2] s32 {
+    glUniform2i(loc, value[0], value[1]);
+  }
+  else #if T == Vector2(s32) {
+    glUniform2i(loc, value.x, value.y);
+  }
+  else #if T == float {
     glUniform1f(loc, value);
   }
   else #if T == [2] float {
@@ -57,31 +65,6 @@ set_uniform :: (program : GLuint, cname : *u8, value : $T) {
   else {
     error("set_uniform: type '%' not supported yet!\nShould probably add it\n", T);
   }
-}
-
-Vector2 :: struct($T : Type) {
-  x, y : T;
-}
-Vector3 :: struct($T : Type) {
-  x, y, z : T;
-}
-Color :: Vector3(float);
-
-Vector4 :: struct($T : Type) {
-  x, y, z, w : T;
-}
-make_vector2 :: inline (x : $T, y : T) -> Vector2(T) {
-  v : Vector2(T);
-  v.x = x;
-  v.y = y;
-  return v;
-}
-make_vector3 :: inline (x : $T, y : T, z: T) -> Vector3(T) {
-  v : Vector3(T);
-  v.x = x;
-  v.y = y;
-  v.z = z;
-  return v;
 }
 
 compile_shader :: (shader_type : GLenum, source_path : string) -> GLuint {
@@ -119,19 +102,25 @@ main :: () {
   using gl;
   glfwSwapInterval(1); // set to 0 if fps too low, supposed to prevent screen tearing
 
+  version_major, version_minor := gl_get_version();
+  print("Loaded OpenGL function pointers, using version: %.%\n", version_major, version_minor);
+
   Vertex :: struct {
     x, y : float;        // coords
     tx, ty : float;      // texture coordinates
-    is_white : int = 0;  // color of the square
+    is_white : GLint;     // color of the square
+    ix, iy : GLint;      // index of what square this is on
   }
 
-  make_vertex :: inline (x : float, y : float, tx : float, ty : float, is_white : int) -> Vertex {
+  make_vertex :: inline (x : float, y : float, tx : float, ty : float, is_white : GLint, ix : GLint, iy : GLint) -> Vertex {
     v : Vertex;
     v.x = x;
     v.y = y;
     v.tx = tx;
     v.ty = ty;
     v.is_white = is_white;
+    v.ix = ix;
+    v.iy = iy;
     return v;
   }
 
@@ -152,17 +141,21 @@ main :: () {
       y  := Math.lerp(-1., 1., yfrac);
       w  := 2 / cast(float) nsquares_width;
       h  := 2 / cast(float) nsquares_height;
-      color := ifx ((i%2==0) ^ (j%2==0)) then 0 else 1;
+      color : GLint = cast(GLint) ifx ((i%2==0) ^ (j%2==0)) then 0 else 1;
+      other_color := ifx color == 0 then 1 else 0; // for fun :)
 
+
+      ix := cast(GLint) i;
+      iy := cast(GLint) (nsquares_height - j - 1); // flip y axis back for square indices
+      // print("ix = %, iy = %\n", ix, iy);
       itri1 := ivert * 6;
       itri2 := ivert * 6 + 3;
-      vertices[itri1+0] = make_vertex(x  , y  , 0, 0, color);
-      vertices[itri1+1] = make_vertex(x  , y+h, 0, 1, color);
-      vertices[itri1+2] = make_vertex(x+w, y+h, 1, 1, color);
-
-      vertices[itri2+0] = make_vertex(x+w, y+h, 1, 1, color);
-      vertices[itri2+1] = make_vertex(x  , y  , 0, 0, color);
-      vertices[itri2+2] = make_vertex(x+w, y  , 1, 0, color);
+      vertices[itri1+0] = make_vertex(x  , y  , 0, 0, color, ix, iy); // first triangle
+      vertices[itri1+1] = make_vertex(x  , y+h, 0, 1, color, ix, iy);
+      vertices[itri1+2] = make_vertex(x+w, y+h, 1, 1, color, ix, iy);
+      vertices[itri2+0] = make_vertex(x+w, y+h, 1, 1, color, ix, iy); // second triangle
+      vertices[itri2+1] = make_vertex(x  , y  , 0, 0, color, ix, iy);
+      vertices[itri2+2] = make_vertex(x+w, y  , 1, 0, color, ix, iy);
     }
   }
 
@@ -175,26 +168,14 @@ main :: () {
   // @note: if things aren't changing, maybe switch to DYNAMIC_DRAW
   glBufferData(GL_ARRAY_BUFFER, vertices.count * size_of(Vertex), vertices.data, GL_STATIC_DRAW);
 
-  { // Defines inputs to vertex shader
-    offset : *Vertex : null; // giving OpenGL the right offsets (basically relative pointers)
-    // Attribute 0 is the vertices and their data
-    glVertexAttribPointer(0, 2, GL_FLOAT, xx false, size_of(Vertex), cast(*void) *offset.x);
-    glEnableVertexAttribArray(0);
-    // Attribute 1 is the texture coordinates
-    glVertexAttribPointer(1, 2, GL_FLOAT, xx false, size_of(Vertex), cast(*void) *offset.tx);
-    glEnableVertexAttribArray(1);
-    // Attribute 2 is the color of the vertices
-    glVertexAttribPointer(2, 1, GL_INT, xx false, size_of(Vertex), cast(*void) *offset.is_white);
-    glEnableVertexAttribArray(2);
-  }
-
-  print("Compiling shaders...\n");
+  print("Compiling and linking shaders ...");
   program := glCreateProgram();
   vertex_shader := compile_shader(GL_VERTEX_SHADER, vertex_shader_path);
   fragment_shader := compile_shader(GL_FRAGMENT_SHADER, fragment_shader_path);
   glAttachShader(program, vertex_shader);
   glAttachShader(program, fragment_shader);
   glLinkProgram(program);
+  print(" success!\n");
   glDeleteShader(vertex_shader); // only flags for deletion, doesn't take up time
   glDeleteShader(fragment_shader);
   glUseProgram(program); // need to use program to set uniforms in the shaders
@@ -202,23 +183,50 @@ main :: () {
   BoardShaderUniforms :: struct {
       white_color  := Color.{0.8, 0.8, 0.8};
       black_color  := Color.{0.4, 0.4, 0.4};
+      // Uncomment these for a fun time (;
+      // white_color  := Color.{0.7, 0.5, 0.2};
+      // black_color  := Color.{0.3, 0.8, 0.1};
 
-      border_color := Color.{0.0, 0.0, 0.0};
+      border_color := Color.{0.0, 0.0, 0.0}; // black
       border_width :  float = 0.01; // units of square width
   }
-  board_uniforms : BoardShaderUniforms;
+  board_look : BoardShaderUniforms;
+  // board_look.border_color = 0.5*(board_look.black_color + board_look.white_color);
 
-  { // set uniforms
-    set_uniform(program, "blackColor",  board_uniforms.black_color);
-    set_uniform(program, "whiteColor",  board_uniforms.white_color);
-    set_uniform(program, "borderColor", board_uniforms.border_color);
-    set_uniform(program, "borderWidth", board_uniforms.border_width);
+  // UNIFORMS
+  {
+    set_uniform(program, "blackColor",  board_look.black_color);
+    set_uniform(program, "whiteColor",  board_look.white_color);
+    set_uniform(program, "borderColor", board_look.border_color);
+    set_uniform(program, "borderWidth", board_look.border_width);
+    set_uniform(program, "squareDim",   Vector2(s32).{nsquares_width, nsquares_height});
+  }
+
+  // ATTRIBUTES
+  {
+    // @note: need glVertexAttribIPointer when working with integer types, otherwise
+    //        everything gets implicitly casted to float
+    offset : *Vertex : null; // giving OpenGL the right offsets (basically relative pointers)
+    vsize : GLuint = size_of(Vertex);
+    // The vertices and their data
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.x);
+    // The texture coordinates
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tx);
+    // The color of the vertices
+    glEnableVertexAttribArray(2);
+    glVertexAttribIPointer(2, 1, GL_INT, vsize, cast(*void) *offset.is_white);
+    // The indices of the square
+    glEnableVertexAttribArray(3);
+    glVertexAttribIPointer(3, 2, GL_INT, vsize, cast(*void) *offset.ix);
   }
   
   // render loop
   nframes := 0;
   while !glfwWindowShouldClose(window) {
     nframes += 1;
+    // if nframes % 100 == 0 && nframes > 0 print("On frame %\n", nframes);
     width, height : s32;
     glfwGetFramebufferSize(window, *width, *height);
     glViewport(0, 0, xx width, xx height);
@@ -232,6 +240,7 @@ main :: () {
 
     glfwSwapBuffers(window);
     glfwPollEvents();
+    reset_temporary_storage(); // allows us to allocate temporary stuff without fear every frame
   }
 
   glfwDestroyWindow(window);
