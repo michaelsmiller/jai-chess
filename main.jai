@@ -206,6 +206,7 @@ main :: () {
   nframes : s64 = 0;
   toggle := false; // for debugging
   quit := false;
+  framerate : float = 0.;
   sleep_milliseconds(10); // necessary for timer not to be set off
   while !quit { // game loop
     defer nframes += 1;
@@ -217,7 +218,7 @@ main :: () {
       defer start_timer(*timer);
 
       dt : float = get_seconds(*timer);
-      framerate := cast(float) time_sample_rate / dt; // fps
+      framerate = cast(float) time_sample_rate / dt; // fps
       if nframes % (time_sample_rate) == 0 {
         // print("% fps\n", cast(u32)framerate);
       }
@@ -239,10 +240,15 @@ main :: () {
         quit = true;
       }
       else if event.type == .KEYBOARD && event.key_pressed {
-        print("Key % is pressed!\n", cast(u64)event.key_code);
         if event.key_code == .ENTER {
           toggle = !toggle;
           print("Toggle is now %\n", toggle);
+        }
+        else if event.key_code == xx (#char "f" - 32) {
+          print("% fps\n", cast(int)framerate);
+        }
+        else {
+          print("Key % is pressed!\n", cast(u64)event.key_code);
         }
       }
     }
