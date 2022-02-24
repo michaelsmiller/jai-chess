@@ -1,3 +1,6 @@
+lerp :: Math.lerp;
+
+
 Vector2 :: struct($T : Type) {
   x, y : T;
 }
@@ -71,3 +74,7 @@ operator * :: (v : Vector3($T), a : $S) -> Vector3(T) #symmetric #modify {
   return w;
 }
 
+
+#scope_file
+
+Math :: #import "Math";

@@ -1,14 +1,11 @@
 #import "Basic";
-#import "glfw"; // GLFW for handling windows with the OS
+Input :: #import "Input";
+Window :: #import "Window_Creation"; // @note: maybe rename to avoid confusion
 #import "GL";   // OpenGL
 File :: #import "File"; // for reading files
-Math :: #import "Math"; // for lerp mostly
 
 #load "math.jai"; // my simple math library
 #load "util.jai"; // timer code so far
-
-lerp :: Math.lerp;
-
 
 // constants
 vertex_shader_path   :: "board.vert";
@@ -16,21 +13,7 @@ fragment_shader_path :: "board.frag";
 
 error :: (message : string, print_args : ..Any) {
   print(message, ..print_args);
-  glfwTerminate(); // should be fine even if glfwInit has not been called yet
   exit(1);
-}
-
-error_callback :: (error : s32, description: *u8) #c_call {
-  new_context : Context;
-  push_context new_context {
-    print("WTF!: %\n", to_string(description));
-  }
-}
-
-key_callback :: (window : *GLFWwindow, key: s32, scancode: s32, action: s32, mods: s32) #c_call {
-  if key == GLFW_KEY_ESCAPE && action == GLFW_PRESS {
-    glfwSetWindowShouldClose(window, GLFW_TRUE);
-  }
 }
 
 set_uniform :: (program : GLuint, cname : *u8, value : $T) {
@@ -89,21 +72,20 @@ compile_shader :: (shader_type : GLenum, source_path : string) -> GLuint {
 };
 
 main :: () {
-  glfwSetErrorCallback(error_callback);
-  if !glfwInit() error("Failed to start GLFW...\n");
-  print("Booted up GLFW!\n");
-
   window_size :: Vector2(s32).{800, 800};
-  window := glfwCreateWindow(window_size.x, window_size.y, "Chess", null, null);
+  window := Window.create_window(window_size.x, window_size.y, "Chess");
   if !window error("Couldn't open window!");
+  print("Successfully created window of size % pixels\n", window_size);
 
-  glfwSetKeyCallback(window, key_callback);
-  glfwMakeContextCurrent(window);
-  gl_load(*gl, glfwGetProcAddress); // Makes OpenGL available
+  version_major, version_minor :: 3, 1; // @note: OpenGL version hardcoded
+  gl_create_context(window, version_major, version_minor);
+  gl_load(*gl); // Makes OpenGL available
   using gl;
-  glfwSwapInterval(1); // set to 0 if fps too low, supposed to prevent screen tearing
 
-  version_major, version_minor := gl_get_version();
+  {
+    major, minor := gl_get_version();
+    assert(major == version_major && minor == version_minor);
+  }
   print("Loaded OpenGL function pointers, using version: %.%\n", version_major, version_minor);
 
   Vertex :: struct {
@@ -136,8 +118,8 @@ main :: () {
       xfrac := cast(float) i / cast(float)(nsquares_width);
       yfrac := cast(float) j / cast(float)(nsquares_height);
       // @note add in a range here when more stuff goes on the screen than board
-      x  := Math.lerp(-1., 1., xfrac);
-      y  := Math.lerp(-1., 1., yfrac);
+      x  := lerp(-1., 1., xfrac);
+      y  := lerp(-1., 1., yfrac);
       w  := 2 / cast(float) nsquares_width;
       h  := 2 / cast(float) nsquares_height;
 
@@ -201,7 +183,7 @@ main :: () {
   // ATTRIBUTES
   {
     // @note: need glVertexAttribIPointer when working with integer types, otherwise
-    //        everything gets implicitly casted to float
+    //        everything gets implicitly casted to float for some reason...
     offset : *Vertex : null; // giving OpenGL the right offsets (basically relative pointers)
     vsize : GLuint = size_of(Vertex);
     // The vertices and their data
@@ -210,38 +192,60 @@ main :: () {
     // The texture coordinates
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tx);
-    // The color of the vertices
-    // glEnableVertexAttribArray(2);
-    // glVertexAttribIPointer(2, 1, GL_INT, vsize, cast(*void) *offset.is_white);
     // The indices of the square
     glEnableVertexAttribArray(2);
     glVertexAttribIPointer(2, 2, GL_INT, vsize, cast(*void) *offset.ix);
   }
   
-  // render loop
-  nframes : s64 = 0;
-  time_sample_rate : s64 : 10;
+
+  // game loop
   timer, total_timer : Timer;
   start_timer(*timer);
   start_timer(*total_timer);
-  while !glfwWindowShouldClose(window) {
-    // HANDLE INPUT
+
+  nframes : s64 = 0;
+  toggle := false; // for debugging
+  quit := false;
+  sleep_milliseconds(10); // necessary for timer not to be set off
+  while !quit { // game loop
     defer nframes += 1;
+    
+    // Framerate calculation, done every few frames for a good average
+    time_sample_rate : s64 : 100;
     if nframes % time_sample_rate == 0 {
       stop_timer(*timer);
       defer start_timer(*timer);
 
       dt : float = get_seconds(*timer);
       framerate := cast(float) time_sample_rate / dt; // fps
-      if nframes % (time_sample_rate*time_sample_rate) == 0
-        print("% fps\n", cast(u32)framerate);
+      if nframes % (time_sample_rate) == 0 {
+        // print("% fps\n", cast(u32)framerate);
+      }
 
+    }
+    // absolute time calculation should be done once per frame
+    {
       stop_timer(*total_timer); // don't start total_timer again
       ftime : float = get_seconds(*total_timer); // in seconds;
       set_uniform(program, "t",  ftime);
     }
 
-    glfwPollEvents(); // replace with something real please
+    // HANDLE INPUT
+    // Input.input_per_frame_event_and_flag_update();
+    Input.update_window_events();
+    event_count := Input.events_this_frame.count;
+    for event: Input.events_this_frame {
+      if event.type == .QUIT || (event.type == .KEYBOARD && event.key_code == .ESCAPE) {
+        quit = true;
+      }
+      else if event.type == .KEYBOARD && event.key_pressed {
+        print("Key % is pressed!\n", cast(u64)event.key_code);
+        if event.key_code == .ENTER {
+          toggle = !toggle;
+          print("Toggle is now %\n", toggle);
+        }
+      }
+    }
 
     // SIMULATE
     // @todo: make a board state and shit
@@ -249,7 +253,12 @@ main :: () {
     
     // GRAPHICS
     width, height : s32;
-    glfwGetFramebufferSize(window, *width, *height);
+    {
+      x, y : s32;
+      success : bool;
+      x, y, width, height, success = Window.get_dimensions(window, true);;
+      if !success error("Did not get window dimensions correctly...\n");
+    }
     glViewport(0, 0, xx width, xx height);
 
     // draw to backbuffer
@@ -258,11 +267,10 @@ main :: () {
     glBindVertexArray(vao); // have to bind every frame before drawing
     glDrawArrays(GL_TRIANGLES, 0, vertices.count);
 
-    glfwSwapBuffers(window);
+    Window.swap_buffers(window); // @note soon will be deprecated because depends on GL
+
     reset_temporary_storage(); // allows us to allocate temporary stuff without fear every frame
   }
 
-  glfwDestroyWindow(window);
-  glfwTerminate();
   print("Program exited and shut down correctly\n");
 }
