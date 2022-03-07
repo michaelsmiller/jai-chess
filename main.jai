@@ -4,6 +4,8 @@ Window :: #import "Window_Creation"; // @note: maybe rename to avoid confusion
 #import "GL";   // OpenGL
 File :: #import "File"; // for reading files
 
+STB :: #import "stb_image";
+
 #load "math.jai"; // my simple math library
 #load "util.jai"; // timer code so far
 
@@ -72,6 +74,9 @@ compile_shader :: (shader_type : GLenum, source_path : string) -> GLuint {
 };
 
 main :: () {
+  startup_timer : Timer;
+  start_timer(*startup_timer);
+
   window_size :: Vector2(s32).{800, 800};
   window := Window.create_window(window_size.x, window_size.y, "Chess");
   if !window error("Couldn't open window!");
@@ -88,6 +93,8 @@ main :: () {
   }
   print("Loaded OpenGL function pointers, using version: %.%\n", version_major, version_minor);
 
+  // Should correspond exactly with what is fed to vertex buffer
+  // @todo: make some functions to easily load into vertex buffer given fewer inputs
   Vertex :: struct {
     x, y : float;        // coords
     tx, ty : float;      // texture coordinates
@@ -128,13 +135,37 @@ main :: () {
       // print("ix = %, iy = %\n", ix, iy);
       itri1 := ivert * 6;
       itri2 := ivert * 6 + 3;
-      vertices[itri1+0] = make_vertex(x  , y  , 0, 0, ix, iy); // first triangle
-      vertices[itri1+1] = make_vertex(x  , y+h, 0, 1, ix, iy);
-      vertices[itri1+2] = make_vertex(x+w, y+h, 1, 1, ix, iy);
-      vertices[itri2+0] = make_vertex(x+w, y+h, 1, 1, ix, iy); // second triangle
-      vertices[itri2+1] = make_vertex(x  , y  , 0, 0, ix, iy);
-      vertices[itri2+2] = make_vertex(x+w, y  , 1, 0, ix, iy);
+      // @note: OpenGL texture coordinates are NOT flipped on y for some reason
+      //        so the top of an image has texture coordinate 1, not 0.
+      vertices[itri1+0] = make_vertex(x  , y  , 0, 1, ix, iy); // first triangle
+      vertices[itri1+1] = make_vertex(x  , y+h, 0, 0, ix, iy);
+      vertices[itri1+2] = make_vertex(x+w, y+h, 1, 0, ix, iy);
+      vertices[itri2+0] = make_vertex(x+w, y+h, 1, 0, ix, iy); // second triangle
+      vertices[itri2+1] = make_vertex(x  , y  , 0, 1, ix, iy);
+      vertices[itri2+2] = make_vertex(x+w, y  , 1, 1, ix, iy);
     }
+  }
+
+  // TEXTURES
+  // Reading in 1 texture takes 100 ms because OpenGL (might be because GPU hopefully)
+  texture : GLuint;
+  {
+    width, height, nchannels : s32;
+    image_path :: "media/pawn.png";
+
+    data : *u8 = STB.stbi_load(image_path, *width, *height, *nchannels, 4);
+    if (data == null) error("Unable to load image '%'\n", image_path);
+    defer free(data); // @note: just calls free(), so can use that...
+    print("Loaded image with size (%, %) and % color channels\n", width, height, nchannels);
+
+    glGenTextures(1, *texture); // only one texture for now
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    // @note: make sure internal format is GL_RGBA and the initial format is what the image
+    //        actually is (e.g. RGB)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, xx width, xx height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);;
+    if glGetError() != GL_NO_ERROR error("There was an OpenGL texture error!\n");
+    glGenerateMipmap(GL_TEXTURE_2D);
   }
 
   vertex_buffer : GLuint;
@@ -161,9 +192,6 @@ main :: () {
   BoardShaderUniforms :: struct {
       white_color  := Color.{0.8, 0.8, 0.8};
       black_color  := Color.{0.4, 0.4, 0.4};
-      // Uncomment these for a fun time (;
-      // white_color  := Color.{0.7, 0.5, 0.2};
-      // black_color  := Color.{0.3, 0.8, 0.1};
 
       border_color := Color.{0.0, 0.0, 0.0}; // black
       border_width :  float = 0.01; // units of square width
@@ -208,6 +236,8 @@ main :: () {
   quit := false;
   framerate : float = 0.;
   sleep_milliseconds(10); // necessary for timer not to be set off
+  stop_timer(*startup_timer);
+  print("Startup took % ms\n", get_millis(*startup_timer));
   while !quit { // game loop
     defer nframes += 1;
     
@@ -245,17 +275,24 @@ main :: () {
           print("Toggle is now %\n", toggle);
         }
         else if event.key_code == xx (#char "f" - 32) {
-          print("% fps\n", cast(int)framerate);
+          // @todo: print utf8 letter corresponding with the key_code
+          print("Respects paid: % fps\n", cast(int)framerate);
         }
         else {
-          print("Key % is pressed!\n", cast(u64)event.key_code);
+          builder : String_Builder;
+          init_string_builder(*builder, 3);
+          defer free_buffers(*builder);
+          if event.ctrl_pressed append(*builder, "Ctrl-");
+          if event.alt_pressed append(*builder, "Alt-");
+          if event.shift_pressed append(*builder, "Shift-");
+          append(*builder, tprint("%\n", cast(u64)event.key_code));
+          print(builder_to_string(*builder, __temporary_allocator));
         }
       }
     }
 
     // SIMULATE
     // @todo: make a board state and shit
-
     
     // GRAPHICS
     width, height : s32;
@@ -274,9 +311,7 @@ main :: () {
     glDrawArrays(GL_TRIANGLES, 0, vertices.count);
 
     Window.swap_buffers(window); // @note soon will be deprecated because depends on GL
-
     reset_temporary_storage(); // allows us to allocate temporary stuff without fear every frame
   }
-
   print("Program exited and shut down correctly\n");
 }

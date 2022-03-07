@@ -6,8 +6,8 @@
 precision mediump int;
 precision mediump float;
 
-in vec3 vertColor;
-in vec2 texCoords;
+in vec3 vertColor; // the background color of the square
+in vec2 texCoords; // texture coordinates within square
 flat in ivec2 squareIndex;
 
 // this is the last fragment shader so only output is gl_FragColor
@@ -19,6 +19,8 @@ uniform ivec2 squareDim = ivec2(8, 8);
 
 uniform float t = 0.;
 uniform float period = 3; // in seconds
+
+uniform sampler2D defaultTexture;
 
 // gl_FragColor might be specific to 1.40...?
 void main() {
@@ -37,6 +39,8 @@ void main() {
   else
     gl_FragColor.rgb = vertColor;
 
+  // debug, alpha blend?
+
   // everything below is to play with dynamism
   float red = gl_FragColor.r;
   float dr = 1. - red;
@@ -49,4 +53,12 @@ void main() {
   float addition = dr * sin(angle);
   red = red + 0.2 * addition;
   gl_FragColor.r = clamp(red, 0., 1.);
+
+  if (squareIndex.x == 1 && squareIndex.y == 1) {
+    vec4 texColor = texture(defaultTexture, texCoords);
+    // gl_FragColor.g = texCoords.x;
+    // gl_FragColor.b = texCoords.y;
+    // gl_FragColor.r = 0.;
+    gl_FragColor = texColor;
+  }
 }

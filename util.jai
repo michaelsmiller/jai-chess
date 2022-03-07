@@ -1,6 +1,5 @@
 // get_current_file_time() returns time in 100s of ns, or 0.1 microseconds
 // divide by 10_000 to get milliseconds.
-
 Timer :: struct {
   start : u64;
   end   : u64;

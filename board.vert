@@ -22,7 +22,7 @@ void main() {
 
   int isWhite = (int(squareIndex.x%2==0) ^ int(squareIndex.y%2==0)); // 0 or 1
   if (isWhite == 0)
-    vertColor = vec3(whiteColor.r, whiteColor.g, whiteColor.b);
+    vertColor = whiteColor.rgb;
   else
-    vertColor = vec3(blackColor.r, blackColor.g, blackColor.b);
+    vertColor = blackColor.rgb;
 }
