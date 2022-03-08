@@ -20,7 +20,7 @@ uniform ivec2 squareDim = ivec2(8, 8);
 uniform float t = 0.;
 uniform float period = 3; // in seconds
 
-uniform sampler2D defaultTexture;
+// uniform sampler2D defaultTexture;
 
 // for accessing the texture as a spritesheet
 const float numPieces = 6; // 6 distinct pieces
@@ -43,8 +43,6 @@ void main() {
   else
     gl_FragColor.rgb = vertColor;
 
-  // debug, alpha blend?
-
   // everything below is to play with dynamism
   float red = gl_FragColor.r;
   float dr = 1. - red;
@@ -58,13 +56,14 @@ void main() {
   red = red + 0.2 * addition;
   gl_FragColor.r = clamp(red, 0., 1.);
 
-  if (squareIndex.x == 1 && squareIndex.y == 1 && !isBorder) {
-    vec2 piece = vec2(1, 1); // white king
-    vec2 tc = vec2(0, 0);
-    tc.x = piece.x * spriteWidth + texCoords.x / numPieces;
-    tc.y = piece.y * spriteWidth + texCoords.y / numPieces;
-    vec4 texColor = texture(defaultTexture, tc);
-    if (texColor.a == 1)
-      gl_FragColor = texColor;
-  }
+  // if (squareIndex.x == 1 && squareIndex.y == 1 && !isBorder) {
+  //   vec2 piece = vec2(1, 1); // white king
+  //   vec2 tc = vec2(0, 0);
+  //   tc.x = piece.x * spriteWidth + texCoords.x / numPieces;
+  //   tc.y = piece.y * spriteWidth + texCoords.y / numPieces;
+  //   vec4 texColor = texture(defaultTexture, tc);
+  //   // This replaces alpha blending, but when there are multiple shaders, need to get rid of this.
+  //   if (texColor.a == 1)
+  //     gl_FragColor = texColor;
+  // }
 }

@@ -10,8 +10,28 @@ STB :: #import "stb_image"; // for reading pngs into memory
 #load "util.jai"; // timer code so far
 
 // constants
-vertex_shader_path   :: "board.vert";
-fragment_shader_path :: "board.frag";
+board_shader_basename :: "board"; // replaces above 2
+
+get_vert_frag_paths :: (basename : string) -> (string, string) {
+  vert :: ".vert";
+  frag :: ".frag";
+
+  vert_path, frag_path : string;
+
+  vert_path.data = alloc(basename.count + vert.count + 1, context.allocator);
+  vert_path.count = basename.count + vert.count + 1;
+  memcpy(vert_path.data, basename.data, basename.count);
+  memcpy(vert_path.data+basename.count, vert.data, vert.count);
+  vert_path[vert_path.count-1] = 0;
+
+  frag_path.data = alloc(basename.count + frag.count + 1, context.allocator);
+  frag_path.count = basename.count + frag.count + 1;
+  memcpy(frag_path.data, basename.data, basename.count);
+  memcpy(frag_path.data+basename.count, frag.data, frag.count);
+  frag_path[frag_path.count-1] = 0;
+
+  return vert_path, frag_path;
+}
 
 error :: (message : string, print_args : ..Any) {
   print(message, ..print_args);
@@ -115,9 +135,9 @@ main :: () {
   nsquares_width :: 8;
   nsquares_height :: 8;
   nsquares :: nsquares_width * nsquares_height;
-  nvertices :: nsquares * 6; // two triangles per square
 
-  vertices : [nvertices] Vertex;
+  vertices       : [4*nsquares] Vertex; // 4 vertices per square
+  vertex_indices : [6*nsquares] GLuint; // 2 triangles per square, each has 3 vertices
   ivert := 0;
   for i : 0..nsquares_width-1 {
     for j : 0..nsquares_height-1 {
@@ -132,83 +152,94 @@ main :: () {
 
       ix := cast(GLint) i;
       iy := cast(GLint) (nsquares_height - j - 1); // flip y axis back for square indices
-      // print("ix = %, iy = %\n", ix, iy);
-      itri1 := ivert * 6;
-      itri2 := ivert * 6 + 3;
+      itri1 := ivert * 4;
       // @note: OpenGL texture coordinates are NOT flipped on y for some reason
       //        so the top of an image has texture coordinate 1, not 0.
-      vertices[itri1+0] = make_vertex(x  , y  , 0, 1, ix, iy); // first triangle
-      vertices[itri1+1] = make_vertex(x  , y+h, 0, 0, ix, iy);
-      vertices[itri1+2] = make_vertex(x+w, y+h, 1, 0, ix, iy);
-      vertices[itri2+0] = make_vertex(x+w, y+h, 1, 0, ix, iy); // second triangle
-      vertices[itri2+1] = make_vertex(x  , y  , 0, 1, ix, iy);
-      vertices[itri2+2] = make_vertex(x+w, y  , 1, 1, ix, iy);
+      vertices[4*ivert+0] = make_vertex(x  , y  , 0, 1, ix, iy); // counter-clockwise starting in UL
+      vertices[4*ivert+1] = make_vertex(x  , y+h, 0, 0, ix, iy);
+      vertices[4*ivert+2] = make_vertex(x+w, y+h, 1, 0, ix, iy);
+      vertices[4*ivert+3] = make_vertex(x+w, y  , 1, 1, ix, iy);
+
+      vertex_indices[6*ivert+0] = cast(u32) (4*ivert+0);
+      vertex_indices[6*ivert+1] = cast(u32) (4*ivert+1);
+      vertex_indices[6*ivert+2] = cast(u32) (4*ivert+2);
+      vertex_indices[6*ivert+3] = cast(u32) (4*ivert+2);
+      vertex_indices[6*ivert+4] = cast(u32) (4*ivert+0);
+      vertex_indices[6*ivert+5] = cast(u32) (4*ivert+3);
     }
   }
 
   // TEXTURES
-  // Reading in 1 texture takes 100 ms because OpenGL (might be because GPU hopefully)
+  // Reading in 1 texture takes 100 ms because OpenGL I guess.
+  //   Doesn't matter as long as I only have one big texture map for all the pieces.
   texture : GLuint;
   {
     width, height, nchannels : s32;
-    // image_path :: "media/pawn.png";
     image_path :: "media/spritesheet.png";
 
+    print("Loading texture from '%' ... ", image_path);
     data : *u8 = STB.stbi_load(image_path, *width, *height, *nchannels, 4);
     if (data == null) error("Unable to load image '%'\n", image_path);
-    defer free(data); // @note: just calls free(), so can use that...
-    print("Loaded image with size (%, %) and % color channels\n", width, height, nchannels);
+    if (nchannels != 4) // expect rgba
+      error("error loading '%': expected % color channels, got %\n", image_path, 4, nchannels);
+    defer free(data);
+    // print("Loaded image with size (%, %) and % color channels\n", width, height, nchannels);
 
     glGenTextures(1, *texture); // only one texture for now
     glBindTexture(GL_TEXTURE_2D, texture);
 
-    // @note: make sure internal format is GL_RGBA and the initial format is what the image
-    //        actually is (e.g. RGB)
-    // glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, xx width, xx height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);;
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, xx width, xx height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);;
+    // @note: internal format is what is used in the fragment shaders
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, xx width, xx height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     if glGetError() != GL_NO_ERROR error("There was an OpenGL texture error!\n");
     glGenerateMipmap(GL_TEXTURE_2D);
+
+    print("success!\n");
   }
 
-  vertex_buffer : GLuint;
-  vao           : GLuint; // vertex array object
+  vertex_buffer  : GLuint; // storage for square vertices
+  element_buffer : GLuint; // storage for triangle vertex indices
+  vao            : GLuint; // vertex array object
+  glGenBuffers(1, *element_buffer);
   glGenBuffers(1, *vertex_buffer);
   glGenVertexArrays(1, *vao);
   glBindVertexArray(vao);
+
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_buffer);
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, vertex_indices.count*size_of(u32), vertex_indices.data, GL_STATIC_DRAW);
   glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
-  // @note: if things aren't changing, maybe switch to DYNAMIC_DRAW
   glBufferData(GL_ARRAY_BUFFER, vertices.count * size_of(Vertex), vertices.data, GL_STATIC_DRAW);
 
-  print("Compiling and linking shaders ...");
   program := glCreateProgram();
-  vertex_shader := compile_shader(GL_VERTEX_SHADER, vertex_shader_path);
-  fragment_shader := compile_shader(GL_FRAGMENT_SHADER, fragment_shader_path);
-  glAttachShader(program, vertex_shader);
-  glAttachShader(program, fragment_shader);
-  glLinkProgram(program);
-  print(" success!\n");
-  glDeleteShader(vertex_shader); // only flags for deletion, doesn't take up time
-  glDeleteShader(fragment_shader);
+  { // shader initialization code
+    print("Compiling and linking board shaders ...");
+    vertex_shader_path, fragment_shader_path := get_vert_frag_paths(board_shader_basename);
+    vertex_shader := compile_shader(GL_VERTEX_SHADER, vertex_shader_path);
+    fragment_shader := compile_shader(GL_FRAGMENT_SHADER, fragment_shader_path);
+    glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+    glLinkProgram(program);
+    print(" success!\n");
+    glDeleteShader(vertex_shader); // only flags for deletion, doesn't take up time
+    glDeleteShader(fragment_shader);
+  }
   glUseProgram(program); // need to use program to set uniforms in the shaders
 
   BoardShaderUniforms :: struct {
       white_color  := Color.{0.8, 0.8, 0.8};
       black_color  := Color.{0.4, 0.4, 0.4};
 
-      border_color := Color.{0.0, 0.0, 0.0}; // black
-      border_width :  float = 0.01; // units of square width
+      border_color := Color.{0.0, 0.0, 0.0}; // black for now
+      border_width :  float = 0.01; // in units of square width
   }
   board_look : BoardShaderUniforms;
 
   // UNIFORMS
-  {
-    set_uniform(program, "blackColor",  board_look.black_color);
-    set_uniform(program, "whiteColor",  board_look.white_color);
-    set_uniform(program, "borderColor", board_look.border_color);
-    set_uniform(program, "borderWidth", board_look.border_width);
-    set_uniform(program, "squareDim",   Vector2(s32).{nsquares_width, nsquares_height});
-    set_uniform(program, "t",  cast(float) 0.);
-  }
+  set_uniform(program, "blackColor",  board_look.black_color);
+  set_uniform(program, "whiteColor",  board_look.white_color);
+  set_uniform(program, "borderColor", board_look.border_color);
+  set_uniform(program, "borderWidth", board_look.border_width);
+  set_uniform(program, "squareDim",   Vector2(s32).{nsquares_width, nsquares_height});
+  set_uniform(program, "t",  cast(float) 0.);
 
   // ATTRIBUTES
   {
@@ -310,7 +341,8 @@ main :: () {
     glClear(GL_COLOR_BUFFER_BIT);
     glUseProgram(program); // program is a shading program, specifically
     glBindVertexArray(vao); // have to bind every frame before drawing
-    glDrawArrays(GL_TRIANGLES, 0, vertices.count);
+    // drawing triangles by looking up vertices with the vertex index list
+    glDrawElements(GL_TRIANGLES, xx vertex_indices.count, GL_UNSIGNED_INT, cast(*void)0);
 
     Window.swap_buffers(window); // @note soon will be deprecated because depends on GL
     reset_temporary_storage(); // allows us to allocate temporary stuff without fear every frame
