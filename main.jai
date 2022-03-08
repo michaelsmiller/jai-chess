@@ -1,10 +1,10 @@
 #import "Basic";
 Input :: #import "Input";
-Window :: #import "Window_Creation"; // @note: maybe rename to avoid confusion
-#import "GL";   // OpenGL
+Window :: #import "Window_Creation"; // @todo: maybe rename to avoid confusion
+#import "GL";   // OpenGL, doesn't need a namespace because most functions are in a global struct anyway
 File :: #import "File"; // for reading files
 
-STB :: #import "stb_image";
+STB :: #import "stb_image"; // for reading pngs into memory
 
 #load "math.jai"; // my simple math library
 #load "util.jai"; // timer code so far
@@ -151,7 +151,8 @@ main :: () {
   texture : GLuint;
   {
     width, height, nchannels : s32;
-    image_path :: "media/pawn.png";
+    // image_path :: "media/pawn.png";
+    image_path :: "media/spritesheet.png";
 
     data : *u8 = STB.stbi_load(image_path, *width, *height, *nchannels, 4);
     if (data == null) error("Unable to load image '%'\n", image_path);
@@ -163,7 +164,8 @@ main :: () {
 
     // @note: make sure internal format is GL_RGBA and the initial format is what the image
     //        actually is (e.g. RGB)
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, xx width, xx height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);;
+    // glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, xx width, xx height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);;
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, xx width, xx height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);;
     if glGetError() != GL_NO_ERROR error("There was an OpenGL texture error!\n");
     glGenerateMipmap(GL_TEXTURE_2D);
   }

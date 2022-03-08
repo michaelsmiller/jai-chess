@@ -22,16 +22,20 @@ uniform float period = 3; // in seconds
 
 uniform sampler2D defaultTexture;
 
+// for accessing the texture as a spritesheet
+const float numPieces = 6; // 6 distinct pieces
+const float spriteWidth = 1. / numPieces;
+
 // gl_FragColor might be specific to 1.40...?
 void main() {
   // if fragment in border then color that shit accordingly
   bool isBorder = texCoords.x < borderWidth || texCoords.x > 1. - borderWidth
                || texCoords.y < borderWidth || texCoords.y > 1. - borderWidth;
   // still on the border if on the edges
-  if (squareIndex.x == 0 && texCoords.x < 2*borderWidth)                  isBorder = true;
   if (squareIndex.x == squareDim.x-1 && texCoords.x > (1. - 2*borderWidth)) isBorder = true;
-  if (squareIndex.y == 0 && texCoords.y > (1. - 2*borderWidth)) isBorder = true;
-  if (squareIndex.y == squareDim.y-1 && texCoords.y < 2*borderWidth) isBorder = true;
+  if (squareIndex.y == squareDim.y-1 && texCoords.y > (1. - 2*borderWidth)) isBorder = true;
+  if (squareIndex.x == 0 && texCoords.x < 2*borderWidth)                    isBorder = true;
+  if (squareIndex.y == 0 && texCoords.y < 2*borderWidth)                    isBorder = true;
 
   // gl_FragColor.a doesn't seem to do anything
   if (isBorder)
@@ -54,11 +58,13 @@ void main() {
   red = red + 0.2 * addition;
   gl_FragColor.r = clamp(red, 0., 1.);
 
-  if (squareIndex.x == 1 && squareIndex.y == 1) {
-    vec4 texColor = texture(defaultTexture, texCoords);
-    // gl_FragColor.g = texCoords.x;
-    // gl_FragColor.b = texCoords.y;
-    // gl_FragColor.r = 0.;
-    gl_FragColor = texColor;
+  if (squareIndex.x == 1 && squareIndex.y == 1 && !isBorder) {
+    vec2 piece = vec2(1, 1); // white king
+    vec2 tc = vec2(0, 0);
+    tc.x = piece.x * spriteWidth + texCoords.x / numPieces;
+    tc.y = piece.y * spriteWidth + texCoords.y / numPieces;
+    vec4 texColor = texture(defaultTexture, tc);
+    if (texColor.a == 1)
+      gl_FragColor = texColor;
   }
 }
