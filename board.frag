@@ -20,13 +20,8 @@ uniform ivec2 squareDim = ivec2(8, 8);
 uniform float t = 0.;
 uniform float period = 3; // in seconds
 
-// uniform sampler2D defaultTexture;
+uniform sampler2D defaultTexture;
 
-// for accessing the texture as a spritesheet
-const float numPieces = 6; // 6 distinct pieces
-const float spriteWidth = 1. / numPieces;
-
-// gl_FragColor might be specific to 1.40...?
 void main() {
   // if fragment in border then color that shit accordingly
   bool isBorder = texCoords.x < borderWidth || texCoords.x > 1. - borderWidth
@@ -55,15 +50,4 @@ void main() {
   float addition = dr * sin(angle);
   red = red + 0.2 * addition;
   gl_FragColor.r = clamp(red, 0., 1.);
-
-  // if (squareIndex.x == 1 && squareIndex.y == 1 && !isBorder) {
-  //   vec2 piece = vec2(1, 1); // white king
-  //   vec2 tc = vec2(0, 0);
-  //   tc.x = piece.x * spriteWidth + texCoords.x / numPieces;
-  //   tc.y = piece.y * spriteWidth + texCoords.y / numPieces;
-  //   vec4 texColor = texture(defaultTexture, tc);
-  //   // This replaces alpha blending, but when there are multiple shaders, need to get rid of this.
-  //   if (texColor.a == 1)
-  //     gl_FragColor = texColor;
-  // }
 }

@@ -10,25 +10,26 @@ STB :: #import "stb_image"; // for reading pngs into memory
 #load "util.jai"; // timer code so far
 
 // constants
-board_shader_basename :: "board"; // replaces above 2
-
 get_vert_frag_paths :: (basename : string) -> (string, string) {
   vert :: ".vert";
   frag :: ".frag";
 
-  vert_path, frag_path : string;
+  allocator := context.allocator;
+  context.allocator = __temporary_allocator; // shouldn't need to hold filenames for long
+  defer context.allocator = allocator;
 
-  vert_path.data = alloc(basename.count + vert.count + 1, context.allocator);
-  vert_path.count = basename.count + vert.count + 1;
-  memcpy(vert_path.data, basename.data, basename.count);
-  memcpy(vert_path.data+basename.count, vert.data, vert.count);
-  vert_path[vert_path.count-1] = 0;
+  builder : String_Builder;
+  init_string_builder(*builder);
+  // defer free_buffers(*builder);
+  append(*builder, basename);
+  append(*builder, vert);
+  vert_path := builder_to_string(*builder);
+  reset(*builder); // maybe not necessary
 
-  frag_path.data = alloc(basename.count + frag.count + 1, context.allocator);
-  frag_path.count = basename.count + frag.count + 1;
-  memcpy(frag_path.data, basename.data, basename.count);
-  memcpy(frag_path.data+basename.count, frag.data, frag.count);
-  frag_path[frag_path.count-1] = 0;
+  init_string_builder(*builder);
+  append(*builder, basename);
+  append(*builder, frag);
+  frag_path := builder_to_string(*builder);
 
   return vert_path, frag_path;
 }
@@ -38,9 +39,9 @@ error :: (message : string, print_args : ..Any) {
   exit(1);
 }
 
-set_uniform :: (program : GLuint, cname : *u8, value : $T) {
+set_uniform :: (board_program : GLuint, cname : *u8, value : $T) {
   using gl;
-  loc := glGetUniformLocation(program, cname);
+  loc := glGetUniformLocation(board_program, cname);
   if loc < 0 {
     name := to_string(cname);
     error("location of uniform '%' not found. Might not be active.\n", name);
@@ -104,7 +105,7 @@ main :: () {
 
   version_major, version_minor :: 3, 1; // @note: OpenGL version hardcoded
   gl_create_context(window, version_major, version_minor);
-  gl_load(*gl); // Makes OpenGL available
+  gl_load(*gl); // Makes OpenGL functions available
   using gl;
 
   {
@@ -112,6 +113,8 @@ main :: () {
     assert(major == version_major && minor == version_minor);
   }
   print("Loaded OpenGL function pointers, using version: %.%\n", version_major, version_minor);
+
+  glEnable(GL_MULTISAMPLE);
 
   // Should correspond exactly with what is fed to vertex buffer
   // @todo: make some functions to easily load into vertex buffer given fewer inputs
@@ -132,26 +135,27 @@ main :: () {
     return v;
   }
 
-  nsquares_width :: 8;
-  nsquares_height :: 8;
-  nsquares :: nsquares_width * nsquares_height;
+  nsquare_width :: 8;
+  nsquare_height :: 8;
+  square_dim :: Vector2(s32).{nsquare_width, nsquare_height};
+  nsquares :: nsquare_width*nsquare_height;
 
   vertices       : [4*nsquares] Vertex; // 4 vertices per square
   vertex_indices : [6*nsquares] GLuint; // 2 triangles per square, each has 3 vertices
   ivert := 0;
-  for i : 0..nsquares_width-1 {
-    for j : 0..nsquares_height-1 {
+  for i : 0..square_dim.x-1 {
+    for j : 0..square_dim.y-1 {
       defer ivert += 1;
-      xfrac := cast(float) i / cast(float)(nsquares_width);
-      yfrac := cast(float) j / cast(float)(nsquares_height);
+      xfrac := cast(float) i / cast(float)(square_dim.x);
+      yfrac := cast(float) j / cast(float)(square_dim.y);
       // @note add in a range here when more stuff goes on the screen than board
       x  := lerp(-1., 1., xfrac);
       y  := lerp(-1., 1., yfrac);
-      w  := 2 / cast(float) nsquares_width;
-      h  := 2 / cast(float) nsquares_height;
+      w  := 2 / cast(float) square_dim.x;
+      h  := 2 / cast(float) square_dim.y;
 
       ix := cast(GLint) i;
-      iy := cast(GLint) (nsquares_height - j - 1); // flip y axis back for square indices
+      iy := cast(GLint) (square_dim.y - j - 1); // flip y axis back for square indices
       itri1 := ivert * 4;
       // @note: OpenGL texture coordinates are NOT flipped on y for some reason
       //        so the top of an image has texture coordinate 1, not 0.
@@ -160,14 +164,105 @@ main :: () {
       vertices[4*ivert+2] = make_vertex(x+w, y+h, 1, 0, ix, iy);
       vertices[4*ivert+3] = make_vertex(x+w, y  , 1, 1, ix, iy);
 
+      // Bottom left triangle
       vertex_indices[6*ivert+0] = cast(u32) (4*ivert+0);
       vertex_indices[6*ivert+1] = cast(u32) (4*ivert+1);
       vertex_indices[6*ivert+2] = cast(u32) (4*ivert+2);
+      // Upper right triangle
       vertex_indices[6*ivert+3] = cast(u32) (4*ivert+2);
       vertex_indices[6*ivert+4] = cast(u32) (4*ivert+0);
       vertex_indices[6*ivert+5] = cast(u32) (4*ivert+3);
     }
   }
+
+  // These definitions correspond to the arbitrary positioning in the spritesheet
+  PieceColor :: enum s32 {
+    WHITE :: 0;
+    BLACK :: 1;
+  }
+  PieceType :: enum s32 {
+    NONE   :: 0;
+    QUEEN  :: 1;
+    KING   :: 2;
+    BISHOP :: 3;
+    KNIGHT :: 4;
+    ROOK   :: 5;
+    PAWN   :: 6;
+  }
+  Piece       :: struct {
+    color     : PieceColor;
+    type      : PieceType;
+    loc       : Vector2(s32);
+  }
+  PieceVertex :: struct {
+    color     : PieceColor;
+    type      : PieceType;
+    pos       : Vector2(float);
+    tex : Vector2(float);
+  }
+
+  make_piece_vertex :: (color : PieceColor, type : PieceType, px : float, py : float, tx : float, ty : float) -> PieceVertex {
+    p : PieceVertex;
+    p.color = color;
+    p.type = type;
+    p.pos.x = px;
+    p.pos.y = py;
+    p.tex.x = tx;
+    p.tex.y = ty;
+    return p;
+  }
+
+  using PieceColor;
+  using PieceType;
+
+  pieces : [..] Piece;
+  defer array_free(pieces);
+  array_reserve(*pieces, nsquares);
+  array_add(*pieces, .{BLACK, KING, .{0, 1}});
+
+  // Create PieceVertex array from the other array
+  piece_vertices : [..] PieceVertex;
+  piece_indices  : [..] u32;
+  defer array_free(piece_vertices);
+  defer array_free(piece_indices);
+  array_reserve(*piece_vertices, nsquares*4);
+  array_reserve(*piece_indices, nsquares*6);
+
+  { // this will be a function for computing the vertex/index data for piece texture rectangles
+    array_reset(*piece_vertices);
+    array_reset(*piece_indices);
+    for *piece : pieces {
+      xfrac := cast(float) piece.loc.x / cast(float)(square_dim.x);
+      yfrac := cast(float) piece.loc.y / cast(float)(square_dim.y);
+      // @note add in a range here when more stuff goes on the screen than board
+      x  := lerp(-1., 1., xfrac);
+      y  := lerp(-1., 1., yfrac);
+      w  := 2 / cast(float) square_dim.x;
+      h  := 2 / cast(float) square_dim.y;
+      print("loc: %\n", piece.loc);
+      print("x : [%, %]\n", x, x+w);
+      print("y : [%, %]\n", y, y+h);
+
+      using piece;
+      array_add(*piece_vertices, make_piece_vertex(color, type, x  , y  , 0, 1)); // UL
+      array_add(*piece_vertices, make_piece_vertex(color, type, x  , y+h, 0, 0)); // LL
+      array_add(*piece_vertices, make_piece_vertex(color, type, x+w, y+h, 1, 0)); // LR
+      array_add(*piece_vertices, make_piece_vertex(color, type, x+w, y  , 1, 1)); // UR
+
+      off := cast(u32) (it_index * 4);
+
+      // LL triangle
+      array_add(*piece_indices, off+0);
+      array_add(*piece_indices, off+1);
+      array_add(*piece_indices, off+2);
+      // UR triangle
+      array_add(*piece_indices, off+2);
+      array_add(*piece_indices, off+3);
+      array_add(*piece_indices, off+0);
+    }
+  }
+  print("Created % pieces, % vertices, % indices.\n", pieces.count, piece_vertices.count, piece_indices.count);
+
 
   // TEXTURES
   // Reading in 1 texture takes 100 ms because OpenGL I guess.
@@ -177,53 +272,116 @@ main :: () {
     width, height, nchannels : s32;
     image_path :: "media/spritesheet.png";
 
-    print("Loading texture from '%' ... ", image_path);
+    print("Loading texture from '%'\n", image_path);
     data : *u8 = STB.stbi_load(image_path, *width, *height, *nchannels, 4);
     if (data == null) error("Unable to load image '%'\n", image_path);
     if (nchannels != 4) // expect rgba
       error("error loading '%': expected % color channels, got %\n", image_path, 4, nchannels);
     defer free(data);
-    // print("Loaded image with size (%, %) and % color channels\n", width, height, nchannels);
+    print("Successfully Loaded % x % image w/ % color channels into memory\n", width, height, nchannels);
 
     glGenTextures(1, *texture); // only one texture for now
     glBindTexture(GL_TEXTURE_2D, texture);
 
     // @note: internal format is what is used in the fragment shaders
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, xx width, xx height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
-    if glGetError() != GL_NO_ERROR error("There was an OpenGL texture error!\n");
-    glGenerateMipmap(GL_TEXTURE_2D);
+    // Make mipmapped texture look better
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0); // no mipmaps, INCREASE IF NEED THEM
 
-    print("success!\n");
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); // bilinear
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR); // trilinear
+
+    glTexImage2D  (GL_TEXTURE_2D, 0, GL_RGBA, xx width, xx height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    if glGetError() != GL_NO_ERROR error("There was an OpenGL texture error!\n");
+    // glGenerateMipmap(GL_TEXTURE_2D); // ONLY INLUDE IF NEED MIPMAPS
+
+    print("Created a (%, %) texture\n", width, height);
   }
 
-  vertex_buffer  : GLuint; // storage for square vertices
-  element_buffer : GLuint; // storage for triangle vertex indices
-  vao            : GLuint; // vertex array object
-  glGenBuffers(1, *element_buffer);
-  glGenBuffers(1, *vertex_buffer);
-  glGenVertexArrays(1, *vao);
-  glBindVertexArray(vao);
+  create_array_object :: (indices : [] u32, vertices : [] $T) -> GLuint {
+    using gl;
+    vao            : GLuint; // output
+    element_buffer : GLuint; // storage for triangle vertex indices
+    vertex_buffer  : GLuint; // storage for square vertices
+    glGenBuffers(1, *element_buffer);
+    glGenBuffers(1, *vertex_buffer);
+    glGenVertexArrays(1, *vao);
+    glBindVertexArray(vao);
 
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_buffer);
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, vertex_indices.count*size_of(u32), vertex_indices.data, GL_STATIC_DRAW);
-  glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
-  glBufferData(GL_ARRAY_BUFFER, vertices.count * size_of(Vertex), vertices.data, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_buffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.count*size_of(u32), indices.data, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+    glBufferData(GL_ARRAY_BUFFER, vertices.count * size_of(T), vertices.data, GL_STATIC_DRAW);
+    return vao;
+  }
 
-  program := glCreateProgram();
-  { // shader initialization code
-    print("Compiling and linking board shaders ...");
-    vertex_shader_path, fragment_shader_path := get_vert_frag_paths(board_shader_basename);
-    vertex_shader := compile_shader(GL_VERTEX_SHADER, vertex_shader_path);
-    fragment_shader := compile_shader(GL_FRAGMENT_SHADER, fragment_shader_path);
+  compile_shader_program :: (basename : string) -> GLuint {
+    using gl;
+    program := glCreateProgram();
+    print("Compiling and linking '%' shaders ...", basename);
+    vert_path, frag_path := get_vert_frag_paths(basename);
+    vertex_shader := compile_shader(GL_VERTEX_SHADER, vert_path);
+    fragment_shader := compile_shader(GL_FRAGMENT_SHADER, frag_path);
     glAttachShader(program, vertex_shader);
     glAttachShader(program, fragment_shader);
     glLinkProgram(program);
     print(" success!\n");
-    glDeleteShader(vertex_shader); // only flags for deletion, doesn't take up time
+    glDeleteShader(vertex_shader);
     glDeleteShader(fragment_shader);
+    return program;
   }
-  glUseProgram(program); // need to use program to set uniforms in the shaders
 
+  // allocate buffers and shit
+  piece_vao := create_array_object(piece_indices, piece_vertices);
+  piece_program := compile_shader_program("piece");
+
+  board_vao := create_array_object(vertex_indices, vertices);
+  board_program := compile_shader_program("board");
+
+  // ATTRIBUTES
+  { // attributes for board_program
+    glBindVertexArray(board_vao);
+    // @note: need glVertexAttribIPointer when working with integer types, otherwise
+    //        everything gets implicitly casted to float for some reason...
+    offset : *Vertex : null; // giving OpenGL the right offsets (basically relative pointers)
+    vsize : GLuint = size_of(Vertex);
+    vi : u32 = 0;
+    // The vertices and their data
+    glEnableVertexAttribArray(vi);
+    glVertexAttribPointer(vi, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.x);
+    vi += 1;
+    // The texture coordinates
+    glEnableVertexAttribArray(vi);
+    glVertexAttribPointer(vi, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tx);
+    vi += 1;
+    // The indices of the square
+    glEnableVertexAttribArray(vi);
+    glVertexAttribIPointer(vi, 2, GL_INT, vsize, cast(*void) *offset.ix);
+    vi += 1;
+  }
+
+  { // attributes for piece_program
+    glBindVertexArray(piece_vao); // @note: needed, and not too sure why
+    // @note: need glVertexAttribIPointer when working with integer types, otherwise
+    //        everything gets implicitly casted to float for some reason...
+    offset : *PieceVertex : null; // giving OpenGL the right offsets (basically relative pointers)
+    vsize : GLuint = size_of(PieceVertex);
+    // Color
+    glEnableVertexAttribArray(0);
+    glVertexAttribIPointer(0, 1, GL_INT, vsize, cast(*void) *offset.color);
+    // The type
+    glEnableVertexAttribArray(1);
+    glVertexAttribIPointer(1, 1, GL_INT, vsize, cast(*void) *offset.type);
+    // position of piece on board
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.pos);
+    // position of piece on board
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tex);
+  }
+
+  glUseProgram(board_program);
   BoardShaderUniforms :: struct {
       white_color  := Color.{0.8, 0.8, 0.8};
       black_color  := Color.{0.4, 0.4, 0.4};
@@ -234,29 +392,12 @@ main :: () {
   board_look : BoardShaderUniforms;
 
   // UNIFORMS
-  set_uniform(program, "blackColor",  board_look.black_color);
-  set_uniform(program, "whiteColor",  board_look.white_color);
-  set_uniform(program, "borderColor", board_look.border_color);
-  set_uniform(program, "borderWidth", board_look.border_width);
-  set_uniform(program, "squareDim",   Vector2(s32).{nsquares_width, nsquares_height});
-  set_uniform(program, "t",  cast(float) 0.);
-
-  // ATTRIBUTES
-  {
-    // @note: need glVertexAttribIPointer when working with integer types, otherwise
-    //        everything gets implicitly casted to float for some reason...
-    offset : *Vertex : null; // giving OpenGL the right offsets (basically relative pointers)
-    vsize : GLuint = size_of(Vertex);
-    // The vertices and their data
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.x);
-    // The texture coordinates
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tx);
-    // The indices of the square
-    glEnableVertexAttribArray(2);
-    glVertexAttribIPointer(2, 2, GL_INT, vsize, cast(*void) *offset.ix);
-  }
+  set_uniform(board_program, "blackColor",  board_look.black_color);
+  set_uniform(board_program, "whiteColor",  board_look.white_color);
+  set_uniform(board_program, "borderColor", board_look.border_color);
+  set_uniform(board_program, "borderWidth", board_look.border_width);
+  set_uniform(board_program, "squareDim",   square_dim);
+  set_uniform(board_program, "t",  cast(float) 0.);
   
 
   // game loop
@@ -291,7 +432,8 @@ main :: () {
     {
       stop_timer(*total_timer); // don't start total_timer again
       ftime : float = get_seconds(*total_timer); // in seconds;
-      set_uniform(program, "t",  ftime);
+      glUseProgram(board_program); // Need to be using board program, don't know why
+      set_uniform(board_program, "t",  ftime);
     }
 
     // HANDLE INPUT
@@ -339,10 +481,17 @@ main :: () {
 
     // draw to backbuffer
     glClear(GL_COLOR_BUFFER_BIT);
-    glUseProgram(program); // program is a shading program, specifically
-    glBindVertexArray(vao); // have to bind every frame before drawing
-    // drawing triangles by looking up vertices with the vertex index list
-    glDrawElements(GL_TRIANGLES, xx vertex_indices.count, GL_UNSIGNED_INT, cast(*void)0);
+    { // draw board
+      glUseProgram(board_program); // board_program is a shading board_program, specifically
+      glBindVertexArray(board_vao); // have to bind every frame before drawing
+      // drawing triangles by looking up vertices with the vertex index list
+      glDrawElements(GL_TRIANGLES, xx vertex_indices.count, GL_UNSIGNED_INT, xx 0);
+    }
+    { // draw pieces
+      glUseProgram(piece_program); // board_program is a shading board_program, specifically
+      glBindVertexArray(piece_vao); // have to bind every frame before drawing
+      glDrawElements(GL_TRIANGLES, xx piece_indices.count, GL_UNSIGNED_INT, xx 0);
+    }
 
     Window.swap_buffers(window); // @note soon will be deprecated because depends on GL
     reset_temporary_storage(); // allows us to allocate temporary stuff without fear every frame
