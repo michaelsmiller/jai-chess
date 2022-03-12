@@ -1,6 +1,6 @@
 #import "Basic";
 Input :: #import "Input";
-Window :: #import "Window_Creation"; // @todo: maybe rename to avoid confusion
+Window :: #import "Window_Creation"; // @todo: move back to GLFW for control over # samples/pixel
 #import "GL";   // OpenGL, doesn't need a namespace because most functions are in a global struct anyway
 File :: #import "File"; // for reading files
 
@@ -9,7 +9,11 @@ STB :: #import "stb_image"; // for reading pngs into memory
 #load "math.jai"; // my simple math library
 #load "util.jai"; // timer code so far
 
-// constants
+error :: (message : string, print_args : ..Any) {
+  print(message, ..print_args);
+  exit(1);
+}
+
 get_vert_frag_paths :: (basename : string) -> (string, string) {
   vert :: ".vert";
   frag :: ".frag";
@@ -34,14 +38,9 @@ get_vert_frag_paths :: (basename : string) -> (string, string) {
   return vert_path, frag_path;
 }
 
-error :: (message : string, print_args : ..Any) {
-  print(message, ..print_args);
-  exit(1);
-}
-
-set_uniform :: (board_program : GLuint, cname : *u8, value : $T) {
+set_uniform :: (program : GLuint, cname : *u8, value : $T) {
   using gl;
-  loc := glGetUniformLocation(board_program, cname);
+  loc := glGetUniformLocation(program, cname);
   if loc < 0 {
     name := to_string(cname);
     error("location of uniform '%' not found. Might not be active.\n", name);
@@ -77,7 +76,7 @@ set_uniform :: (board_program : GLuint, cname : *u8, value : $T) {
 }
 
 compile_shader :: (shader_type : GLenum, source_path : string) -> GLuint {
-  using gl; // @todo: put this at the top of files that are graphics only
+  using gl;
   shader := glCreateShader(shader_type);
   shader_text, file_success := File.read_entire_file(source_path, true);
   defer free(shader_text);
@@ -108,13 +107,14 @@ main :: () {
   gl_load(*gl); // Makes OpenGL functions available
   using gl;
 
+  // OpenGL defaults here:
+  glClearColor(0.2, 0.2, 0.2, 1.); // a pleasant gray
+
   {
     major, minor := gl_get_version();
     assert(major == version_major && minor == version_minor);
   }
   print("Loaded OpenGL function pointers, using version: %.%\n", version_major, version_minor);
-
-  glEnable(GL_MULTISAMPLE);
 
   // Should correspond exactly with what is fed to vertex buffer
   // @todo: make some functions to easily load into vertex buffer given fewer inputs
@@ -135,6 +135,8 @@ main :: () {
     return v;
   }
 
+  // @todo: ask about this in the discord, because I'm not sure if it's a feature that
+  //        components of a constant struct literal cannot be known at compile time...
   nsquare_width :: 8;
   nsquare_height :: 8;
   square_dim :: Vector2(s32).{nsquare_width, nsquare_height};
@@ -146,9 +148,10 @@ main :: () {
   for i : 0..square_dim.x-1 {
     for j : 0..square_dim.y-1 {
       defer ivert += 1;
+      // @todo: this calculation is in screen space coordinates, but will need to be moved to
+      //        board space coordinates when other widgets appear on the screen.
       xfrac := cast(float) i / cast(float)(square_dim.x);
       yfrac := cast(float) j / cast(float)(square_dim.y);
-      // @note add in a range here when more stuff goes on the screen than board
       x  := lerp(-1., 1., xfrac);
       y  := lerp(-1., 1., yfrac);
       w  := 2 / cast(float) square_dim.x;
@@ -181,18 +184,17 @@ main :: () {
     BLACK :: 1;
   }
   PieceType :: enum s32 {
-    NONE   :: 0;
-    QUEEN  :: 1;
-    KING   :: 2;
-    BISHOP :: 3;
-    KNIGHT :: 4;
-    ROOK   :: 5;
-    PAWN   :: 6;
+    QUEEN  :: 0;
+    KING   :: 1;
+    BISHOP :: 2;
+    KNIGHT :: 3;
+    ROOK   :: 4;
+    PAWN   :: 5;
   }
   Piece       :: struct {
     color     : PieceColor;
     type      : PieceType;
-    loc       : Vector2(s32);
+    loc       : Vector2(s32); // position on [0,7]^2
   }
   PieceVertex :: struct {
     color     : PieceColor;
@@ -212,26 +214,28 @@ main :: () {
     return p;
   }
 
+  // enums for color and type of chess pieces, pretty harmless
   using PieceColor;
   using PieceType;
 
+  // logical pieces, or jsut the game state
   pieces : [..] Piece;
   defer array_free(pieces);
   array_reserve(*pieces, nsquares);
-  array_add(*pieces, .{BLACK, KING, .{0, 1}});
+  array_add(*pieces, .{BLACK, KING, .{1, 1}});
 
   // Create PieceVertex array from the other array
   piece_vertices : [..] PieceVertex;
   piece_indices  : [..] u32;
   defer array_free(piece_vertices);
   defer array_free(piece_indices);
-  array_reserve(*piece_vertices, nsquares*4);
-  array_reserve(*piece_indices, nsquares*6);
 
   { // this will be a function for computing the vertex/index data for piece texture rectangles
     array_reset(*piece_vertices);
     array_reset(*piece_indices);
     for *piece : pieces {
+      // @todo: this calculation is in screen space coordinates, but will need to be moved to
+      //        board space coordinates when other widgets appear on the screen.
       xfrac := cast(float) piece.loc.x / cast(float)(square_dim.x);
       yfrac := cast(float) piece.loc.y / cast(float)(square_dim.y);
       // @note add in a range here when more stuff goes on the screen than board
@@ -264,9 +268,127 @@ main :: () {
   print("Created % pieces, % vertices, % indices.\n", pieces.count, piece_vertices.count, piece_indices.count);
 
 
+  create_array_object :: inline (indices : [] u32, vertices : [] $T) -> GLuint {
+    using gl;
+    vao            : GLuint; // output
+    element_buffer : GLuint; // storage for triangle vertex indices
+    vertex_buffer  : GLuint; // storage for square vertices
+    glGenVertexArrays(1, *vao);
+    glBindVertexArray(vao);
+
+    glGenBuffers(1, *element_buffer);
+    glGenBuffers(1, *vertex_buffer);
+
+    // @todo: replace GL_STATIC_DRAW with a variable so that we can add and remove pieces at will
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_buffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.count*size_of(u32), indices.data, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+    glBufferData(GL_ARRAY_BUFFER, vertices.count * size_of(T), vertices.data, GL_STATIC_DRAW);
+    return vao;
+  }
+
+  compile_shader_program :: (basename : string) -> GLuint {
+    using gl;
+    program := glCreateProgram();
+    print("Compiling and linking '%' shaders ...", basename);
+    vert_path, frag_path := get_vert_frag_paths(basename);
+    vertex_shader := compile_shader(GL_VERTEX_SHADER, vert_path);
+    fragment_shader := compile_shader(GL_FRAGMENT_SHADER, frag_path);
+    defer glDeleteShader(vertex_shader);
+    defer glDeleteShader(fragment_shader);
+
+    glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+    glLinkProgram(program);
+    print(" success!\n");
+    return program;
+  }
+
+  display_board :: true; // setting to false will remove all trace of the board under the pieces
+
+  #if display_board {
+  board_vao := create_array_object(vertex_indices, vertices);
+  glBindVertexArray(board_vao);
+  board_program := compile_shader_program("board");
+  }
+
+  // UNIFORMS
+  #if display_board {
+  glUseProgram(board_program);
+  BoardShaderUniforms :: struct {
+      white_color  := Color.{0.8, 0.8, 0.8};
+      black_color  := Color.{0.4, 0.4, 0.4};
+
+      border_color := Color.{0.0, 0.0, 0.0}; // black for now
+      border_width :  float = 0.01; // in units of square width
+  }
+  board_look : BoardShaderUniforms;
+
+  set_uniform(board_program, "blackColor",  board_look.black_color);
+  set_uniform(board_program, "whiteColor",  board_look.white_color);
+  set_uniform(board_program, "borderColor", board_look.border_color);
+  set_uniform(board_program, "borderWidth", board_look.border_width);
+  set_uniform(board_program, "squareDim",   square_dim);
+  set_uniform(board_program, "t",  cast(float) 0.);
+  print("Set uniforms successfully.\n");
+
+  // ATTRIBUTES
+  { // attributes for board_program
+    glBindVertexArray(board_vao);
+    glUseProgram(board_program);
+    // @note: need glVertexAttribIPointer when working with integer types, otherwise
+    //        everything gets implicitly casted to float for some reason...
+    offset : *Vertex : null; // giving OpenGL the right offsets (basically relative pointers)
+    vsize : GLuint = size_of(Vertex);
+    vi : u32 = 0;
+    // The vertices and their data
+    glEnableVertexAttribArray(vi);
+    glVertexAttribPointer(vi, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.x);
+    vi += 1;
+    // The texture coordinates
+    glEnableVertexAttribArray(vi);
+    glVertexAttribPointer(vi, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tx);
+    vi += 1;
+    // The indices of the square
+    glEnableVertexAttribArray(vi);
+    glVertexAttribIPointer(vi, 2, GL_INT, vsize, cast(*void) *offset.ix);
+    vi += 1;
+  }
+  } // display_board
+
+  // PIECE program
+
   // TEXTURES
   // Reading in 1 texture takes 100 ms because OpenGL I guess.
   //   Doesn't matter as long as I only have one big texture map for all the pieces.
+
+  // allocate buffers and shit
+  piece_vao := create_array_object(piece_indices, piece_vertices);
+  glBindVertexArray(piece_vao);
+  piece_program := compile_shader_program("piece");
+
+  { // attributes for piece_program
+    glBindVertexArray(piece_vao); // @note: needed, and not too sure why
+    glUseProgram(piece_program);
+    
+    // @note: need glVertexAttribIPointer when working with integer types, otherwise
+    //        everything gets implicitly casted to float for some reason...
+    offset : *PieceVertex : null; // giving OpenGL the right offsets (basically relative pointers)
+    vsize : GLuint = size_of(PieceVertex);
+    // Color
+    glEnableVertexAttribArray(0);
+    glVertexAttribIPointer(0, 1, GL_INT, vsize, cast(*void) *offset.color);
+    // The type
+    glEnableVertexAttribArray(1);
+    glVertexAttribIPointer(1, 1, GL_INT, vsize, cast(*void) *offset.type);
+    
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.pos);
+    // position of piece on board
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tex);
+  }
+
   texture : GLuint;
   {
     width, height, nchannels : s32;
@@ -299,106 +421,6 @@ main :: () {
     print("Created a (%, %) texture\n", width, height);
   }
 
-  create_array_object :: (indices : [] u32, vertices : [] $T) -> GLuint {
-    using gl;
-    vao            : GLuint; // output
-    element_buffer : GLuint; // storage for triangle vertex indices
-    vertex_buffer  : GLuint; // storage for square vertices
-    glGenBuffers(1, *element_buffer);
-    glGenBuffers(1, *vertex_buffer);
-    glGenVertexArrays(1, *vao);
-    glBindVertexArray(vao);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_buffer);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.count*size_of(u32), indices.data, GL_STATIC_DRAW);
-    glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
-    glBufferData(GL_ARRAY_BUFFER, vertices.count * size_of(T), vertices.data, GL_STATIC_DRAW);
-    return vao;
-  }
-
-  compile_shader_program :: (basename : string) -> GLuint {
-    using gl;
-    program := glCreateProgram();
-    print("Compiling and linking '%' shaders ...", basename);
-    vert_path, frag_path := get_vert_frag_paths(basename);
-    vertex_shader := compile_shader(GL_VERTEX_SHADER, vert_path);
-    fragment_shader := compile_shader(GL_FRAGMENT_SHADER, frag_path);
-    glAttachShader(program, vertex_shader);
-    glAttachShader(program, fragment_shader);
-    glLinkProgram(program);
-    print(" success!\n");
-    glDeleteShader(vertex_shader);
-    glDeleteShader(fragment_shader);
-    return program;
-  }
-
-  // allocate buffers and shit
-  piece_vao := create_array_object(piece_indices, piece_vertices);
-  piece_program := compile_shader_program("piece");
-
-  board_vao := create_array_object(vertex_indices, vertices);
-  board_program := compile_shader_program("board");
-
-  // ATTRIBUTES
-  { // attributes for board_program
-    glBindVertexArray(board_vao);
-    // @note: need glVertexAttribIPointer when working with integer types, otherwise
-    //        everything gets implicitly casted to float for some reason...
-    offset : *Vertex : null; // giving OpenGL the right offsets (basically relative pointers)
-    vsize : GLuint = size_of(Vertex);
-    vi : u32 = 0;
-    // The vertices and their data
-    glEnableVertexAttribArray(vi);
-    glVertexAttribPointer(vi, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.x);
-    vi += 1;
-    // The texture coordinates
-    glEnableVertexAttribArray(vi);
-    glVertexAttribPointer(vi, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tx);
-    vi += 1;
-    // The indices of the square
-    glEnableVertexAttribArray(vi);
-    glVertexAttribIPointer(vi, 2, GL_INT, vsize, cast(*void) *offset.ix);
-    vi += 1;
-  }
-
-  { // attributes for piece_program
-    glBindVertexArray(piece_vao); // @note: needed, and not too sure why
-    // @note: need glVertexAttribIPointer when working with integer types, otherwise
-    //        everything gets implicitly casted to float for some reason...
-    offset : *PieceVertex : null; // giving OpenGL the right offsets (basically relative pointers)
-    vsize : GLuint = size_of(PieceVertex);
-    // Color
-    glEnableVertexAttribArray(0);
-    glVertexAttribIPointer(0, 1, GL_INT, vsize, cast(*void) *offset.color);
-    // The type
-    glEnableVertexAttribArray(1);
-    glVertexAttribIPointer(1, 1, GL_INT, vsize, cast(*void) *offset.type);
-    // position of piece on board
-    glEnableVertexAttribArray(2);
-    glVertexAttribPointer(2, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.pos);
-    // position of piece on board
-    glEnableVertexAttribArray(3);
-    glVertexAttribPointer(3, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tex);
-  }
-
-  glUseProgram(board_program);
-  BoardShaderUniforms :: struct {
-      white_color  := Color.{0.8, 0.8, 0.8};
-      black_color  := Color.{0.4, 0.4, 0.4};
-
-      border_color := Color.{0.0, 0.0, 0.0}; // black for now
-      border_width :  float = 0.01; // in units of square width
-  }
-  board_look : BoardShaderUniforms;
-
-  // UNIFORMS
-  set_uniform(board_program, "blackColor",  board_look.black_color);
-  set_uniform(board_program, "whiteColor",  board_look.white_color);
-  set_uniform(board_program, "borderColor", board_look.border_color);
-  set_uniform(board_program, "borderWidth", board_look.border_width);
-  set_uniform(board_program, "squareDim",   square_dim);
-  set_uniform(board_program, "t",  cast(float) 0.);
-  
 
   // game loop
   timer, total_timer : Timer;
@@ -429,12 +451,15 @@ main :: () {
 
     }
     // absolute time calculation should be done once per frame
+    #if display_board
+    {
     {
       stop_timer(*total_timer); // don't start total_timer again
       ftime : float = get_seconds(*total_timer); // in seconds;
       glUseProgram(board_program); // Need to be using board program, don't know why
       set_uniform(board_program, "t",  ftime);
     }
+    } // display_board
 
     // HANDLE INPUT
     // Input.input_per_frame_event_and_flag_update();
@@ -474,22 +499,24 @@ main :: () {
     {
       x, y : s32;
       success : bool;
-      x, y, width, height, success = Window.get_dimensions(window, true);;
+      x, y, width, height, success = Window.get_dimensions(window, true);
       if !success error("Did not get window dimensions correctly...\n");
     }
     glViewport(0, 0, xx width, xx height);
 
     // draw to backbuffer
     glClear(GL_COLOR_BUFFER_BIT);
+    #if display_board
     { // draw board
-      glUseProgram(board_program); // board_program is a shading board_program, specifically
+      // glClearColor(1, 1, 1, 0);
       glBindVertexArray(board_vao); // have to bind every frame before drawing
-      // drawing triangles by looking up vertices with the vertex index list
+      glUseProgram(board_program); // board_program is a shading board_program, specifically
       glDrawElements(GL_TRIANGLES, xx vertex_indices.count, GL_UNSIGNED_INT, xx 0);
     }
     { // draw pieces
-      glUseProgram(piece_program); // board_program is a shading board_program, specifically
+      // glClearColor(0.2, 0.2, 0.2, 0);
       glBindVertexArray(piece_vao); // have to bind every frame before drawing
+      glUseProgram(piece_program); // board_program is a shading board_program, specifically
       glDrawElements(GL_TRIANGLES, xx piece_indices.count, GL_UNSIGNED_INT, xx 0);
     }
 

@@ -7,14 +7,13 @@ precision mediump float;
 
 in vec2 texIndex;
 in vec2 texCoords;
+in vec3 debugColor; // @todo remove this
 
 uniform sampler2D textureMap;
 
 // for accessing the texture as a spritesheet
 const float numPieces = 6; // 6 distinct pieces
 const float spriteWidth = 1. / numPieces; // width of a piece in texture space
-
-// const vec2 texCoords = vec2(0.5, 0.5); // @todo: remove
 
 // gl_FragColor might be specific to 1.40...?
 void main() {
@@ -26,8 +25,11 @@ void main() {
   // This replaces alpha blending, but when there are multiple shaders, need to get rid of this.
   if (texColor.a == 1)
     gl_FragColor = texColor;
+  else
+    discard; // Does not process this fragment any further
 
   // @todo: figure out what the value of gl_Position is in other shader maybe
   //        Use like a debug color or something
-  gl_FragColor = vec4(1., 0., 0., 1.); // temporary
+  // gl_FragColor = vec4(1., 0., 0., 1.); // temporary
+  // gl_FragColor.rgb = debugColor;
 }
