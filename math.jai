@@ -60,17 +60,19 @@ operator + :: (a : Vector3($T), b : Vector3(T)) -> Vector3(T) {
 
 operator * :: (v : Vector3($T), a : $S) -> Vector3(T) #symmetric #modify {
   // Only allow this to polymorph for scalars
-  if T.type == {
-    case .INTEGER; return;
-    case .FLOAT; return;
+  ti, si := cast(*Type_Info) T, cast(*Type_Info) S;
+  if ti.type == {
+    case .INTEGER; return true;
+    case .FLOAT; return true;
   }
-  T = null;
+  return false;
 }
 {
   w : Vector3(T);
-  w.x = v.x * cast(T) a;
-  w.y = v.y * cast(T) a;
-  w.z = v.z * cast(T) a;
+  as := cast(T) a;
+  w.x = v.x * as;
+  w.y = v.y * as;
+  w.z = v.z * as;
   return w;
 }
 

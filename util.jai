@@ -26,6 +26,14 @@ get_seconds :: (timer : *Timer) -> float {
   return cast(float) ms * 0.001;
 }
 
+
+// random conversions
+
+to_hex :: (x : $T) -> string {
+  return sprint("0x%", formatInt(x, base=16));
+}
+
 #scope_file;
 
 #import "Time";
+#import "Basic"; // string

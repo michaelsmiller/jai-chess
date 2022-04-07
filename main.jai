@@ -7,11 +7,45 @@ File :: #import "File"; // for reading files
 STB :: #import "stb_image"; // for reading pngs into memory
 
 #load "math.jai"; // my simple math library
-#load "util.jai"; // timer code so far
+#load "util.jai"; // just timer code so far
 
 error :: (message : string, print_args : ..Any) {
   print(message, ..print_args);
   exit(1);
+}
+
+check_framebuffer_status :: (err_on_failure := true) -> (bool, GLenum) {
+  e := glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if e == GL_FRAMEBUFFER_COMPLETE return false, e;
+
+  if e == {
+    case GL_FRAMEBUFFER_UNDEFINED;               print("ERROR: GL_FRAMEBUFFER_UNDEFINED\n");
+    case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;   print("ERROR: GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT\n");
+    case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;   print("ERROR: GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT\n");
+    case GL_FRAMEBUFFER_UNSUPPORTED;             print("ERROR: GL_FRAMEBUFFER_UNSUPPORTED\n");
+    case GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE;  print("ERROR: GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE\n");
+
+    case; print("FRAMEBUFFER STATUS: % (add to check_framebuffer_status())\n", to_hex(e));
+  }
+  if err_on_failure exit(1);
+  return true, e;
+}
+
+check_gl_error :: (err_on_failure := true) -> (bool, GLenum) {
+  e := glGetError();
+  if e == GL_NO_ERROR return false, e;
+
+  if e == {
+    case GL_INVALID_ENUM;                  print("ERROR: GL_INVALID_ENUM\n");
+    case GL_INVALID_VALUE;                 print("ERROR: GL_INVALID_VALUE\n");
+    case GL_INVALID_OPERATION;             print("ERROR: GL_INVALID_OPERATION\n");
+    case GL_INVALID_FRAMEBUFFER_OPERATION; print("ERROR: GL_INVALID_FRAMEBUFFER_OPERATION\n");
+                                           check_framebuffer_status(err_on_failure);
+
+    case; print("GL ERROR: % (add to check_gl_error())\n", to_hex(e));
+  }
+  if err_on_failure exit(1);
+  return true, e;
 }
 
 get_vert_frag_paths :: (basename : string) -> (string, string) {
@@ -63,9 +97,6 @@ set_uniform :: (program : GLuint, cname : *u8, value : $T) {
   }
   else #if T == Vector3(float) {
     glUniform3f(loc, value.x, value.y, value.z);
-  }
-  else #if T == [4] float {
-    glUniform4f(loc, value[0], value[1], value[2], value[3]);
   }
   else #if T == [4] float {
     glUniform4f(loc, value[0], value[1], value[2], value[3]);
@@ -304,16 +335,11 @@ main :: () {
     return program;
   }
 
-  display_board :: true; // setting to false will remove all trace of the board under the pieces
-
-  #if display_board {
   board_vao := create_array_object(vertex_indices, vertices);
   glBindVertexArray(board_vao);
   board_program := compile_shader_program("board");
-  }
 
   // UNIFORMS
-  #if display_board {
   glUseProgram(board_program);
   BoardShaderUniforms :: struct {
       white_color  := Color.{0.8, 0.8, 0.8};
@@ -354,7 +380,6 @@ main :: () {
     glVertexAttribIPointer(vi, 2, GL_INT, vsize, cast(*void) *offset.ix);
     vi += 1;
   }
-  } // display_board
 
   // PIECE program
 
@@ -370,7 +395,7 @@ main :: () {
   { // attributes for piece_program
     glBindVertexArray(piece_vao); // @note: needed, and not too sure why
     glUseProgram(piece_program);
-    
+
     // @note: need glVertexAttribIPointer when working with integer types, otherwise
     //        everything gets implicitly casted to float for some reason...
     offset : *PieceVertex : null; // giving OpenGL the right offsets (basically relative pointers)
@@ -381,7 +406,7 @@ main :: () {
     // The type
     glEnableVertexAttribArray(1);
     glVertexAttribIPointer(1, 1, GL_INT, vsize, cast(*void) *offset.type);
-    
+
     glEnableVertexAttribArray(2);
     glVertexAttribPointer(2, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.pos);
     // position of piece on board
@@ -389,8 +414,32 @@ main :: () {
     glVertexAttribPointer(3, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tex);
   }
 
-  texture : GLuint;
+  texture : GLuint;  // spritesheet of pieces, made in Inkscape to correspond with board size exactly
+
+  texture2 : GLuint; // multisampled version of spritesheet
+  fbo : GLuint;      // framebuffer just for multisampling images
+  rdo : GLuint;      // renderbuffer bound to fbo which we can target when drawing images
   {
+    // @todo: remove when renderbuffer method just works out of the box
+    // glGenTextures(1, *texture2);
+    // glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, texture2);
+    // glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, 4, GL_RGBA, xx width, xx height, xx true);
+    // if glGetError() != GL_NO_ERROR error("Multi-sample didn't work...\n");
+
+    glGenFramebuffers(1, *fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glGenRenderbuffers(1, *rdo);
+    glBindRenderbuffer(GL_RENDERBUFFER, rdo);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rdo);
+    nsamples_x :: 2;
+    nsamples_y :: nsamples_x;
+    glEnable(GL_MULTISAMPLE);
+    glRenderbufferStorageMultisample(GL_RENDERBUFFER, nsamples_x*nsamples_y, GL_RGBA, xx window_size.x, xx window_size.y);
+
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    check_framebuffer_status(); // errors if framebuffer incomplete
+
     width, height, nchannels : s32;
     image_path :: "media/spritesheet.png";
 
@@ -403,6 +452,7 @@ main :: () {
     print("Successfully Loaded % x % image w/ % color channels into memory\n", width, height, nchannels);
 
     glGenTextures(1, *texture); // only one texture for now
+    // glBindTexture(GL_TEXTURE_2D, texture);
     glBindTexture(GL_TEXTURE_2D, texture);
 
     // @note: internal format is what is used in the fragment shaders
@@ -419,6 +469,7 @@ main :: () {
     // glGenerateMipmap(GL_TEXTURE_2D); // ONLY INLUDE IF NEED MIPMAPS
 
     print("Created a (%, %) texture\n", width, height);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0); // Goes back to the backbuffer
   }
 
 
@@ -436,7 +487,7 @@ main :: () {
   print("Startup took % ms\n", get_millis(*startup_timer));
   while !quit { // game loop
     defer nframes += 1;
-    
+
     // Framerate calculation, done every few frames for a good average
     time_sample_rate : s64 : 100;
     if nframes % time_sample_rate == 0 {
@@ -451,15 +502,12 @@ main :: () {
 
     }
     // absolute time calculation should be done once per frame
-    #if display_board
-    {
     {
       stop_timer(*total_timer); // don't start total_timer again
       ftime : float = get_seconds(*total_timer); // in seconds;
       glUseProgram(board_program); // Need to be using board program, don't know why
       set_uniform(board_program, "t",  ftime);
     }
-    } // display_board
 
     // HANDLE INPUT
     // Input.input_per_frame_event_and_flag_update();
@@ -493,7 +541,7 @@ main :: () {
 
     // SIMULATE
     // @todo: make a board state and shit
-    
+
     // GRAPHICS
     width, height : s32;
     {
@@ -503,22 +551,32 @@ main :: () {
       if !success error("Did not get window dimensions correctly...\n");
     }
     glViewport(0, 0, xx width, xx height);
+    // @todo: add other logic to resize renderbuffer if size has changed
 
     // draw to backbuffer
     glClear(GL_COLOR_BUFFER_BIT);
-    #if display_board
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, rdo);
     { // draw board
       // glClearColor(1, 1, 1, 0);
       glBindVertexArray(board_vao); // have to bind every frame before drawing
       glUseProgram(board_program); // board_program is a shading board_program, specifically
       glDrawElements(GL_TRIANGLES, xx vertex_indices.count, GL_UNSIGNED_INT, xx 0);
+      check_gl_error();
     }
     { // draw pieces
-      // glClearColor(0.2, 0.2, 0.2, 0);
       glBindVertexArray(piece_vao); // have to bind every frame before drawing
       glUseProgram(piece_program); // board_program is a shading board_program, specifically
       glDrawElements(GL_TRIANGLES, xx piece_indices.count, GL_UNSIGNED_INT, xx 0);
+
     }
+    { // transfer to backbuffer, got super-sampling for free supposedly
+      glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo); // read from one buffer!
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); // draw to backbuffer
+      // blit
+      glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0); // Goes back to the backbuffer
 
     Window.swap_buffers(window); // @note soon will be deprecated because depends on GL
     reset_temporary_storage(); // allows us to allocate temporary stuff without fear every frame
