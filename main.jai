@@ -433,15 +433,15 @@ main :: () {
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rdo);
     nsamples_x :: 2;
     nsamples_y :: nsamples_x;
-    glEnable(GL_MULTISAMPLE);
+    glEnable(GL_MULTISAMPLE); // this doesn't work probably
     glRenderbufferStorageMultisample(GL_RENDERBUFFER, nsamples_x*nsamples_y, GL_RGBA, xx window_size.x, xx window_size.y);
-
 
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     check_framebuffer_status(); // errors if framebuffer incomplete
 
     width, height, nchannels : s32;
-    image_path :: "media/spritesheet.png";
+    // image_path :: "media/spritesheet.png";
+    image_path :: "media/spritesheet2.png";
 
     print("Loading texture from '%'\n", image_path);
     data : *u8 = STB.stbi_load(image_path, *width, *height, *nchannels, 4);
@@ -457,7 +457,7 @@ main :: () {
 
     // @note: internal format is what is used in the fragment shaders
     // Make mipmapped texture look better
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0); // no mipmaps, INCREASE IF NEED THEM
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0); // no mipmaps, INCREASE IF NEED THEM;
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
