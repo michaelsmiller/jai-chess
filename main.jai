@@ -249,11 +249,12 @@ main :: () {
   using PieceColor;
   using PieceType;
 
-  // logical pieces, or jsut the game state
+  // logical pieces, or just the game state
   pieces : [..] Piece;
   defer array_free(pieces);
   array_reserve(*pieces, nsquares);
-  array_add(*pieces, .{BLACK, KING, .{1, 1}});
+  array_add(*pieces, .{WHITE, KING, .{1, 1}});
+  array_add(*pieces, .{BLACK, KING, .{2, 1}});
 
   // Create PieceVertex array from the other array
   piece_vertices : [..] PieceVertex;
@@ -416,28 +417,12 @@ main :: () {
 
   texture : GLuint;  // spritesheet of pieces, made in Inkscape to correspond with board size exactly
 
-  texture2 : GLuint; // multisampled version of spritesheet
-  fbo : GLuint;      // framebuffer just for multisampling images
-  rdo : GLuint;      // renderbuffer bound to fbo which we can target when drawing images
   {
     // @todo: remove when renderbuffer method just works out of the box
     // glGenTextures(1, *texture2);
     // glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, texture2);
     // glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, 4, GL_RGBA, xx width, xx height, xx true);
     // if glGetError() != GL_NO_ERROR error("Multi-sample didn't work...\n");
-
-    glGenFramebuffers(1, *fbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glGenRenderbuffers(1, *rdo);
-    glBindRenderbuffer(GL_RENDERBUFFER, rdo);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rdo);
-    nsamples_x :: 2;
-    nsamples_y :: nsamples_x;
-    glEnable(GL_MULTISAMPLE); // this doesn't work probably
-    glRenderbufferStorageMultisample(GL_RENDERBUFFER, nsamples_x*nsamples_y, GL_RGBA, xx window_size.x, xx window_size.y);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    check_framebuffer_status(); // errors if framebuffer incomplete
 
     width, height, nchannels : s32;
     // image_path :: "media/spritesheet.png";
@@ -555,8 +540,6 @@ main :: () {
 
     // draw to backbuffer
     glClear(GL_COLOR_BUFFER_BIT);
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glBindRenderbuffer(GL_RENDERBUFFER, rdo);
     { // draw board
       // glClearColor(1, 1, 1, 0);
       glBindVertexArray(board_vao); // have to bind every frame before drawing
@@ -570,13 +553,6 @@ main :: () {
       glDrawElements(GL_TRIANGLES, xx piece_indices.count, GL_UNSIGNED_INT, xx 0);
 
     }
-    { // transfer to backbuffer, got super-sampling for free supposedly
-      glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo); // read from one buffer!
-      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0); // draw to backbuffer
-      // blit
-      glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-    }
-    glBindFramebuffer(GL_FRAMEBUFFER, 0); // Goes back to the backbuffer
 
     Window.swap_buffers(window); // @note soon will be deprecated because depends on GL
     reset_temporary_storage(); // allows us to allocate temporary stuff without fear every frame
