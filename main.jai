@@ -1,6 +1,6 @@
 #import "Basic";
-Input :: #import "Input";
-Window :: #import "Window_Creation"; // @todo: move back to GLFW for control over # samples/pixel
+// Window :: #import "Window_Creation"; // @todo: move back to GLFW for control over # samples/pixel
+#import "glfw";
 #import "GL";   // OpenGL, doesn't need a namespace because most functions are in a global struct anyway
 File :: #import "File"; // for reading files
 
@@ -9,8 +9,17 @@ STB :: #import "stb_image"; // for reading pngs into memory
 #load "math.jai"; // my simple math library
 #load "util.jai"; // just timer code so far
 
+MSAA :: false;
+
+// Global state
+toggle    := false; // for debugging
+framerate : float = 0.; // Written to and displayed on command
+
+
+
 error :: (message : string, print_args : ..Any) {
   print(message, ..print_args);
+  glfwTerminate();
   exit(1);
 }
 
@@ -46,6 +55,40 @@ check_gl_error :: (err_on_failure := true) -> (bool, GLenum) {
   }
   if err_on_failure exit(1);
   return true, e;
+}
+
+// callbacks
+framebuffer_size_callback :: (window : *GLFWwindow, width : s32, height : s32) #c_call {
+  // new_context : Context;
+  // push_context new_context {
+    glViewport(0, 0, xx width, xx height);
+  // }
+}
+
+key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, mods : s32) #c_call {
+  new_context : Context;
+  push_context new_context {
+    if action == GLFW_RELEASE return;
+    if action == GLFW_PRESS && key == GLFW_KEY_ESCAPE
+      glfwSetWindowShouldClose(window, GLFW_TRUE);
+    else if action == GLFW_PRESS && key == GLFW_KEY_ENTER {
+        toggle = !toggle;
+        print("Toggle is now %\n", toggle);
+    }
+    else if action == GLFW_PRESS && key == GLFW_KEY_F {
+      print("Respects paid: % fps\n", cast(int)framerate);
+    }
+    else { // print the key pressed
+      builder : String_Builder;
+      init_string_builder(*builder, 3);
+      defer free_buffers(*builder);
+      if mods & GLFW_MOD_CONTROL append(*builder, "Ctrl-");
+      if mods & GLFW_MOD_ALT     append(*builder, "Alt-");
+      if mods & GLFW_MOD_SHIFT   append(*builder, "Shift-");
+      append(*builder, tprint("Pressed: %\n", to_string(glfwGetKeyName(key, scancode))));
+      print(builder_to_string(*builder, __temporary_allocator));
+    }
+  }
 }
 
 get_vert_frag_paths :: (basename : string) -> (string, string) {
@@ -125,27 +168,38 @@ compile_shader :: (shader_type : GLenum, source_path : string) -> GLuint {
 };
 
 main :: () {
+  version_major, version_minor :: 3, 1; // @note: OpenGL version hardcoded
   startup_timer : Timer;
   start_timer(*startup_timer);
 
   window_size :: Vector2(s32).{800, 800};
-  window := Window.create_window(window_size.x, window_size.y, "Chess");
-  if !window error("Couldn't open window!");
+  if !glfwInit() error("glfwInit() failed");
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+  glfwWindowHint(GLFW_SAMPLES, 16); // for super-sampling!
+  window := glfwCreateWindow(window_size.x, window_size.y, "Chess", null, null);
+  if !window error("Couldn't open GLFW window.");
+  glfwMakeContextCurrent(window);
+
+  // callbacks
+  glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+  glfwSetKeyCallback(window, key_callback);
+  glfwSwapInterval(1);
+
   print("Successfully created window of size % pixels\n", window_size);
 
-  version_major, version_minor :: 3, 1; // @note: OpenGL version hardcoded
-  gl_create_context(window, version_major, version_minor);
-  gl_load(*gl); // Makes OpenGL functions available
+  // gl_create_context(window, version_major, version_minor);
+  gl_load(*gl, glfwGetProcAddress); // Makes OpenGL functions available
   using gl;
 
   // OpenGL defaults here:
-  glClearColor(0.2, 0.2, 0.2, 1.); // a pleasant gray
-
   {
     major, minor := gl_get_version();
+    print("OpenGL version: %.%\n", major, minor);
     assert(major == version_major && minor == version_minor);
   }
-  print("Loaded OpenGL function pointers, using version: %.%\n", version_major, version_minor);
+  print("Loaded OpenGL function pointers\n");
+  glClearColor(0.2, 0.2, 0.2, 1.); // a pleasant gray
 
   // Should correspond exactly with what is fed to vertex buffer
   // @todo: make some functions to easily load into vertex buffer given fewer inputs
@@ -275,9 +329,9 @@ main :: () {
       y  := lerp(-1., 1., yfrac);
       w  := 2 / cast(float) square_dim.x;
       h  := 2 / cast(float) square_dim.y;
-      print("loc: %\n", piece.loc);
-      print("x : [%, %]\n", x, x+w);
-      print("y : [%, %]\n", y, y+h);
+      // print("loc: %\n", piece.loc);
+      // print("x : [%, %]\n", x, x+w);
+      // print("y : [%, %]\n", y, y+h);
 
       using piece;
       array_add(*piece_vertices, make_piece_vertex(color, type, x  , y  , 0, 1)); // UL
@@ -416,15 +470,14 @@ main :: () {
   }
 
   texture : GLuint;  // spritesheet of pieces, made in Inkscape to correspond with board size exactly
-
+  #if MSAA {
+    texture2: GLuint;
+    fbo     : GLuint;
+    rdo     : GLuint;
+  }
   {
-    // @todo: remove when renderbuffer method just works out of the box
-    // glGenTextures(1, *texture2);
-    // glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, texture2);
-    // glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, 4, GL_RGBA, xx width, xx height, xx true);
-    // if glGetError() != GL_NO_ERROR error("Multi-sample didn't work...\n");
-
     width, height, nchannels : s32;
+
     // image_path :: "media/spritesheet.png";
     image_path :: "media/spritesheet2.png";
 
@@ -437,24 +490,43 @@ main :: () {
     print("Successfully Loaded % x % image w/ % color channels into memory\n", width, height, nchannels);
 
     glGenTextures(1, *texture); // only one texture for now
-    // glBindTexture(GL_TEXTURE_2D, texture);
     glBindTexture(GL_TEXTURE_2D, texture);
 
     // @note: internal format is what is used in the fragment shaders
-    // Make mipmapped texture look better
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0); // no mipmaps, INCREASE IF NEED THEM;
+    { // texture settings
+      // Make mipmapped texture look better
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0); // no mipmaps, INCREASE IF NEED THEM;
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); // bilinear
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // bilinear
+      // trilinear filtering only makes result look worse without additional anti-aliasing techniques for minification
+    }
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); // bilinear
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR); // trilinear
-
+    // @note: this glTexImage2D is technically specifying the 0th mipmap level
     glTexImage2D  (GL_TEXTURE_2D, 0, GL_RGBA, xx width, xx height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
     if glGetError() != GL_NO_ERROR error("There was an OpenGL texture error!\n");
-    // glGenerateMipmap(GL_TEXTURE_2D); // ONLY INLUDE IF NEED MIPMAPS
+    // glGenerateMipmap(GL_TEXTURE_2D); // doubles loading time, should be removed if mipmaps not needed
+
+
+    // multisample code
+    #if MSAA {
+      // framebuffer
+      glGenFramebuffers(1, *fbo);
+      glEnable(GL_MULTISAMPLE);
+      glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+      // texture
+      glGenTextures(1, *texture2);
+      glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, texture2);
+      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, 4, GL_RGBA, xx width, xx height, xx true);
+      check_gl_error();
+
+      glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, texture2, 0);
+      check_framebuffer_status(); // errors if fbo is incomplete
+    }
 
     print("Created a (%, %) texture\n", width, height);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0); // Goes back to the backbuffer
+    #if MSAA glBindFramebuffer(GL_FRAMEBUFFER, 0); // Goes back to the backbuffer
   }
 
 
@@ -464,13 +536,11 @@ main :: () {
   start_timer(*total_timer);
 
   nframes : s64 = 0;
-  toggle := false; // for debugging
   quit := false;
-  framerate : float = 0.;
   sleep_milliseconds(10); // necessary for timer not to be set off
   stop_timer(*startup_timer);
   print("Startup took % ms\n", get_millis(*startup_timer));
-  while !quit { // game loop
+  while !glfwWindowShouldClose(window) { // game loop
     defer nframes += 1;
 
     // Framerate calculation, done every few frames for a good average
@@ -495,47 +565,14 @@ main :: () {
     }
 
     // HANDLE INPUT
-    // Input.input_per_frame_event_and_flag_update();
-    Input.update_window_events();
-    event_count := Input.events_this_frame.count;
-    for event: Input.events_this_frame {
-      if event.type == .QUIT || (event.type == .KEYBOARD && event.key_code == .ESCAPE) {
-        quit = true;
-      }
-      else if event.type == .KEYBOARD && event.key_pressed {
-        if event.key_code == .ENTER {
-          toggle = !toggle;
-          print("Toggle is now %\n", toggle);
-        }
-        else if event.key_code == xx (#char "f" - 32) {
-          // @todo: print utf8 letter corresponding with the key_code
-          print("Respects paid: % fps\n", cast(int)framerate);
-        }
-        else {
-          builder : String_Builder;
-          init_string_builder(*builder, 3);
-          defer free_buffers(*builder);
-          if event.ctrl_pressed append(*builder, "Ctrl-");
-          if event.alt_pressed append(*builder, "Alt-");
-          if event.shift_pressed append(*builder, "Shift-");
-          append(*builder, tprint("%\n", cast(u64)event.key_code));
-          print(builder_to_string(*builder, __temporary_allocator));
-        }
-      }
-    }
+    glfwPollEvents(); // automatically invokes the key_callback() function
 
     // SIMULATE
     // @todo: make a board state and shit
 
     // GRAPHICS
     width, height : s32;
-    {
-      x, y : s32;
-      success : bool;
-      x, y, width, height, success = Window.get_dimensions(window, true);
-      if !success error("Did not get window dimensions correctly...\n");
-    }
-    glViewport(0, 0, xx width, xx height);
+    glfwGetWindowSize(window, *width, *height);
     // @todo: add other logic to resize renderbuffer if size has changed
 
     // draw to backbuffer
@@ -551,11 +588,11 @@ main :: () {
       glBindVertexArray(piece_vao); // have to bind every frame before drawing
       glUseProgram(piece_program); // board_program is a shading board_program, specifically
       glDrawElements(GL_TRIANGLES, xx piece_indices.count, GL_UNSIGNED_INT, xx 0);
-
     }
 
-    Window.swap_buffers(window); // @note soon will be deprecated because depends on GL
+    glfwSwapBuffers(window);
     reset_temporary_storage(); // allows us to allocate temporary stuff without fear every frame
   }
+  glfwTerminate();
   print("Program exited and shut down correctly\n");
 }
