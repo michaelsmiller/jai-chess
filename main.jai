@@ -8,13 +8,27 @@ STB :: #import "stb_image"; // for reading pngs into memory
 
 #load "math.jai"; // my simple math library
 #load "util.jai"; // just timer code so far
+#load "chess.jai"; // board/piece state and game logic
 
 MSAA :: false;
 
 // Global state
+//
 toggle    := false; // for debugging
+nframes : s64 = 0;  // number of frames that have passed up to this point
+time_sample_rate : s64 : 100; // for framerate sampling
 framerate : float = 0.; // Written to and displayed on command
+board : Board;
 
+InputState :: enum {
+  DEFAULT;
+  PLACE;
+};
+input_state : InputState = .DEFAULT;
+algebra_buffer_loc : s32;
+algebra_buffer : [3] u8; // 3 characters long, I believe
+
+//
 
 
 error :: (message : string, print_args : ..Any) {
@@ -76,7 +90,7 @@ key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, 
         print("Toggle is now %\n", toggle);
     }
     else if action == GLFW_PRESS && key == GLFW_KEY_F {
-      print("Respects paid: % fps\n", cast(int)framerate);
+      if nframes > time_sample_rate print("Respects paid: % fps\n", cast(int)framerate);
     }
     else { // print the key pressed
       builder : String_Builder;
@@ -231,7 +245,7 @@ main :: () {
 
   // @todo: ask about this in the discord, because I'm not sure if it's a feature that
   //        components of a constant struct literal cannot be known at compile time...
-  nsquare_width :: 8;
+  nsquare_width  :: 8;
   nsquare_height :: 8;
   square_dim :: Vector2(s32).{nsquare_width, nsquare_height};
   nsquares :: nsquare_width*nsquare_height;
@@ -272,29 +286,11 @@ main :: () {
     }
   }
 
-  // These definitions correspond to the arbitrary positioning in the spritesheet
-  PieceColor :: enum s32 {
-    WHITE :: 0;
-    BLACK :: 1;
-  }
-  PieceType :: enum s32 {
-    QUEEN  :: 0;
-    KING   :: 1;
-    BISHOP :: 2;
-    KNIGHT :: 3;
-    ROOK   :: 4;
-    PAWN   :: 5;
-  }
-  Piece       :: struct {
-    color     : PieceColor;
-    type      : PieceType;
-    loc       : Vector2(s32); // position on [0,7]^2
-  }
   PieceVertex :: struct {
     color     : PieceColor;
     type      : PieceType;
     pos       : Vector2(float);
-    tex : Vector2(float);
+    tex       : Vector2(float);
   }
 
   make_piece_vertex :: (color : PieceColor, type : PieceType, px : float, py : float, tx : float, ty : float) -> PieceVertex {
@@ -313,11 +309,16 @@ main :: () {
   using PieceType;
 
   // logical pieces, or just the game state
-  pieces : [..] Piece;
-  defer array_free(pieces);
-  array_reserve(*pieces, nsquares);
-  array_add(*pieces, .{WHITE, KING, .{1, 1}});
-  array_add(*pieces, .{BLACK, KING, .{2, 1}});
+  // pieces : [..] Piece;
+  // defer array_free(pieces);
+  // array_reserve(*pieces, nsquares);
+  // array_add    (*pieces, .{WHITE, KING, .{1, 1}});
+  // array_add    (*pieces, .{BLACK, KING, .{2, 1}});
+
+  board = init_board();
+  // print("%\n", board.squares);
+  place(*board, .{WHITE, KING, .{1, 1}});
+  place(*board, .{BLACK, KING, .{2, 1}});
 
   // Create PieceVertex array from the other array
   piece_vertices : [..] PieceVertex;
@@ -328,7 +329,10 @@ main :: () {
   { // this will be a function for computing the vertex/index data for piece texture rectangles
     array_reset(*piece_vertices);
     array_reset(*piece_indices);
-    for *piece : pieces {
+    n := 0;
+    for *piece : board.squares {
+      if empty(<<piece) continue;
+      defer n += 1;
       // @todo: this calculation is in screen space coordinates, but will need to be moved to
       //        board space coordinates when other widgets appear on the screen.
       xfrac := cast(float) piece.loc.x / cast(float)(square_dim.x);
@@ -338,9 +342,6 @@ main :: () {
       y  := lerp(-1., 1., yfrac);
       w  := 2 / cast(float) square_dim.x;
       h  := 2 / cast(float) square_dim.y;
-      // print("loc: %\n", piece.loc);
-      // print("x : [%, %]\n", x, x+w);
-      // print("y : [%, %]\n", y, y+h);
 
       using piece;
       array_add(*piece_vertices, make_piece_vertex(color, type, x  , y  , 0, 1)); // UL
@@ -348,7 +349,7 @@ main :: () {
       array_add(*piece_vertices, make_piece_vertex(color, type, x+w, y+h, 1, 0)); // LR
       array_add(*piece_vertices, make_piece_vertex(color, type, x+w, y  , 1, 1)); // UR
 
-      off := cast(u32) (it_index * 4);
+      off := cast(u32) (n*4);
 
       // LL triangle
       array_add(*piece_indices, off+0);
@@ -360,8 +361,8 @@ main :: () {
       array_add(*piece_indices, off+0);
     }
   }
-  print("Created % pieces, % vertices, % indices.\n", pieces.count, piece_vertices.count, piece_indices.count);
-
+  print("Created % pieces, % vertices, % indices.\n", num_pieces(*board), piece_vertices.count, piece_indices.count);
+  assert(num_pieces(*board) == num_pieces(*board, .WHITE) + num_pieces(*board, .BLACK));
 
   create_array_object :: inline (indices : [] u32, vertices : [] $T) -> GLuint {
     using gl;
@@ -544,7 +545,6 @@ main :: () {
   start_timer(*timer);
   start_timer(*total_timer);
 
-  nframes : s64 = 0;
   quit := false;
   sleep_milliseconds(10); // necessary for timer not to be set off
   stop_timer(*startup_timer);
@@ -553,7 +553,6 @@ main :: () {
     defer nframes += 1;
 
     // Framerate calculation, done every few frames for a good average
-    time_sample_rate : s64 : 100;
     if nframes % time_sample_rate == 0 {
       stop_timer(*timer);
       defer start_timer(*timer);
