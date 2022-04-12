@@ -174,9 +174,8 @@ main :: () {
 
   window_size :: Vector2(s32).{800, 800};
   if !glfwInit() error("glfwInit() failed");
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-  glfwWindowHint(GLFW_SAMPLES, 16); // for super-sampling!
+  NSAMPLES : s32 : 4;
+  glfwWindowHint(GLFW_SAMPLES, NSAMPLES); // for super-sampling!
   window := glfwCreateWindow(window_size.x, window_size.y, "Chess", null, null);
   if !window error("Couldn't open GLFW window.");
   glfwMakeContextCurrent(window);
@@ -187,8 +186,12 @@ main :: () {
   glfwSwapInterval(1);
 
   print("Successfully created window of size % pixels\n", window_size);
+  {
+    ns := glfwGetWindowAttrib(window, GLFW_SAMPLES);
+    print("nsamples: %\n", ns);
+    // assert(ns == NSAMPLES);
+  }
 
-  // gl_create_context(window, version_major, version_minor);
   gl_load(*gl, glfwGetProcAddress); // Makes OpenGL functions available
   using gl;
 
@@ -198,7 +201,10 @@ main :: () {
     print("OpenGL version: %.%\n", major, minor);
     assert(major == version_major && minor == version_minor);
   }
-  print("Loaded OpenGL function pointers\n");
+  print("Loaded OpenGL instance\n");
+  print(" Vendor:   %\n", to_string(glGetString(GL_VENDOR)));
+  print(" Renderer: %\n", to_string(glGetString(GL_RENDERER)));
+  glEnable(GL_MULTISAMPLE);
   glClearColor(0.2, 0.2, 0.2, 1.); // a pleasant gray
 
   // Should correspond exactly with what is fed to vertex buffer
