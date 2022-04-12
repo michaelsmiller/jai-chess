@@ -91,7 +91,7 @@ key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, 
   }
 }
 
-get_vert_frag_paths :: (basename : string) -> (string, string) {
+get_vert_frag_paths :: (basename : string, folder : string = "shaders") -> (string, string) {
   vert :: ".vert";
   frag :: ".frag";
 
@@ -102,12 +102,16 @@ get_vert_frag_paths :: (basename : string) -> (string, string) {
   builder : String_Builder;
   init_string_builder(*builder);
   // defer free_buffers(*builder);
+  append(*builder, folder);
+  if folder.count > 0 append(*builder, "/");
   append(*builder, basename);
   append(*builder, vert);
   vert_path := builder_to_string(*builder);
   reset(*builder); // maybe not necessary
 
   init_string_builder(*builder);
+  append(*builder, folder);
+  if folder.count > 0 append(*builder, "/");
   append(*builder, basename);
   append(*builder, frag);
   frag_path := builder_to_string(*builder);
@@ -188,8 +192,7 @@ main :: () {
   print("Successfully created window of size % pixels\n", window_size);
   {
     ns := glfwGetWindowAttrib(window, GLFW_SAMPLES);
-    print("nsamples: %\n", ns);
-    // assert(ns == NSAMPLES);
+    print("nsamples = %, wanted %\n", ns, NSAMPLES);
   }
 
   gl_load(*gl, glfwGetProcAddress); // Makes OpenGL functions available
