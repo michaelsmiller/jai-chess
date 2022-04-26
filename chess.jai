@@ -25,6 +25,36 @@ empty :: (using p : Piece) -> bool {
   return type == .EMPTY;
 }
 
+char_to_piece :: (char : u8) -> Piece {
+  p : Piece;
+  capitalized : bool = char >= 65 && char <= 90;
+  lowercased  : bool = char >= 97 && char <= 122;
+  assert(is_alpha(char));
+  if capitalized p.color = .WHITE;
+  else p.color = .BLACK;
+
+  val := to_lower(char);
+  if val == {
+    case #char "k"; p.type = .KING;
+    case #char "r"; p.type = .ROOK;
+    case #char "p"; p.type = .PAWN;
+    case #char "n"; p.type = .KNIGHT;
+    case #char "q"; p.type = .QUEEN;
+    case #char "b"; p.type = .BISHOP;
+    case; print("Invalid piece code: %\n", val); exit(1);
+  }
+
+  return p;
+}
+
+string_to_loc :: (s : string) -> Vector2(s32) {
+  assert(s.count >= 2);
+  v : Vector2(s32);
+  v.x = cast(s32)s[0] - cast(s32) (#char "a");
+  v.y = cast(s32) s[1] - cast(s32) (#char "1");
+  return v;
+}
+
 // holds entire state
 Board_ :: struct(W : s32, H : s32) {
   turn    : PieceColor   = .WHITE;

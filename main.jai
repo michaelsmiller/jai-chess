@@ -14,21 +14,23 @@ MSAA :: false;
 
 // Global state
 //
-toggle    := false; // for debugging
-nframes : s64 = 0;  // number of frames that have passed up to this point
+toggle           := false;    // for debugging
+to_redraw_pieces := false;    // Whether we need to recreate piece vertices and redraw this frame.
+nframes : s64 = 0;            // number of frames that have passed up to this point
 time_sample_rate : s64 : 100; // for framerate sampling
-framerate : float = 0.; // Written to and displayed on command
-board : Board;
+framerate : float = 0.;       // Written to and displayed on command
+
+board : Board;                // The internal game state
 
 InputState :: enum {
   DEFAULT;
   PLACE;
 };
-input_state : InputState = .DEFAULT;
-algebra_buffer_loc : s32;
-algebra_buffer : [3] u8; // 3 characters long, I believe
+input_state : InputState = .DEFAULT; // The mode of inputting character by character
+algebra_buffer_loc : s32;            // The current position in a piece location buffer being written to
+algebra_buffer : [3] u8;             // Piece location buffer, algebraic notation (e.g. pe4)
 
-//
+// End global state
 
 
 error :: (message : string, print_args : ..Any) {
@@ -79,18 +81,62 @@ framebuffer_size_callback :: (window : *GLFWwindow, width : s32, height : s32) #
   // }
 }
 
+char_callback :: (window : *GLFWwindow, char : u32) #c_call {
+  new_context : Context;
+  push_context new_context {
+    char2 := cast(u8)char;
+
+    if input_state == .PLACE {
+      if algebra_buffer_loc == -1 {
+        algebra_buffer_loc = 0;
+        return;
+      }
+
+      algebra_buffer[algebra_buffer_loc] = char2;
+      algebra_buffer_loc += 1;
+      if algebra_buffer_loc == 3 {
+        s : string;
+        s.count = 3;
+        s.data  = algebra_buffer.data;
+        print("All together: %\n", s);
+        p := char_to_piece(s[0]);
+        p.loc = string_to_loc(advance(s, 1));
+        print("Piece: %\n", p);
+        place(*board, p);
+        to_redraw_pieces = true;
+        input_state = .DEFAULT;
+        glfwSetCharCallback(window, null);
+        glfwSetKeyCallback (window, key_callback);
+      }
+      return;
+    }
+    else error("How did we get here?\n");
+  }
+}
+
 key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, mods : s32) #c_call {
   new_context : Context;
   push_context new_context {
     if action == GLFW_RELEASE return;
-    if action == GLFW_PRESS && key == GLFW_KEY_ESCAPE
+
+    if action == GLFW_PRESS && key == GLFW_KEY_ESCAPE {
       glfwSetWindowShouldClose(window, GLFW_TRUE);
-    else if action == GLFW_PRESS && key == GLFW_KEY_ENTER {
+      return;
+    }
+
+    if action == GLFW_PRESS && key == GLFW_KEY_ENTER {
         toggle = !toggle;
         print("Toggle is now %\n", toggle);
     }
     else if action == GLFW_PRESS && key == GLFW_KEY_F {
       if nframes > time_sample_rate print("Respects paid: % fps\n", cast(int)framerate);
+    }
+    else if action == GLFW_PRESS && key == GLFW_KEY_P {
+      print("Entering P mode\n");
+      input_state = .PLACE;
+      glfwSetCharCallback(window, char_callback);
+      glfwSetKeyCallback(window, null);
+      algebra_buffer_loc = -1;
     }
     else { // print the key pressed
       builder : String_Builder;
@@ -582,6 +628,12 @@ main :: () {
     width, height : s32;
     glfwGetWindowSize(window, *width, *height);
     // @todo: add other logic to resize renderbuffer if size has changed
+
+    if to_redraw_pieces {
+      print("Redrawing pieces this frame\n");
+      // @todo: pull out piece drawing and do everything necessary here
+      to_redraw_pieces = false;
+    }
 
     // draw to backbuffer
     glClear(GL_COLOR_BUFFER_BIT);
