@@ -25,7 +25,7 @@ empty :: (using p : Piece) -> bool {
   return type == .EMPTY;
 }
 
-char_to_piece :: (char : u8) -> Piece {
+char_to_piece :: (char : u8) -> bool, Piece {
   p : Piece;
   capitalized : bool = char >= 65 && char <= 90;
   lowercased  : bool = char >= 97 && char <= 122;
@@ -41,18 +41,19 @@ char_to_piece :: (char : u8) -> Piece {
     case #char "n"; p.type = .KNIGHT;
     case #char "q"; p.type = .QUEEN;
     case #char "b"; p.type = .BISHOP;
-    case; print("Invalid piece code: %\n", val); exit(1);
+    case; return false, p;
   }
 
-  return p;
+  return true, p;
 }
 
-string_to_loc :: (s : string) -> Vector2(s32) {
+string_to_loc :: (s : string) -> bool, Vector2(s32) {
   assert(s.count >= 2);
   v : Vector2(s32);
   v.x = cast(s32)s[0] - cast(s32) (#char "a");
   v.y = cast(s32) s[1] - cast(s32) (#char "1");
-  return v;
+  if v.x < 0 || v.y < 0 return false, v;
+  return true, v;
 }
 
 // holds entire state
@@ -81,11 +82,15 @@ num_pieces :: (board : *Board, color : PieceColor = .NONE) -> s32 {
   return count;
 }
 
-place :: (using board : *Board, piece : Piece, check_exists : bool = true) {
+place :: (using board : *Board, piece : Piece, check_exists : bool = true) -> bool {
   i := piece.loc.y * board.H + piece.loc.x;
+  if piece.type == .EMPTY return false;
+  if i < 0 || i >= board.H * board.W return false; // out of bounds check
   square := squares.data + i;
   if !empty(<<square) && check_exists print("WARNING: piece % being overwritten!\n", <<square);
   memcpy(square, *piece, size_of(Piece));
+
+  return true; // success
 }
 
 get :: (using board : *Board, loc : Vector2(s32)) -> Piece {

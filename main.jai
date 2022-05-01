@@ -29,6 +29,7 @@ InputState :: enum {
 input_state : InputState = .DEFAULT; // The mode of inputting character by character
 algebra_buffer_loc : s32;            // The current position in a piece location buffer being written to
 algebra_buffer : [3] u8;             // Piece location buffer, algebraic notation (e.g. pe4)
+// @todo: add global for registering current move and move history
 
 // End global state
 
@@ -98,12 +99,13 @@ char_callback :: (window : *GLFWwindow, char : u32) #c_call {
         s : string;
         s.count = 3;
         s.data  = algebra_buffer.data;
-        print("All together: %\n", s);
-        p := char_to_piece(s[0]);
-        p.loc = string_to_loc(advance(s, 1));
+        print("String entered: %\n", s);
+        success, p := char_to_piece(s[0]);
+        success, p.loc = string_to_loc(advance(s, 1));
         print("Piece: %\n", p);
-        place(*board, p);
-        to_redraw_pieces = true;
+        success = place(*board, p);
+        if !success print("WARNING: Failed to place piece!\n");
+        if success to_redraw_pieces = true;
         input_state = .DEFAULT;
         glfwSetCharCallback(window, null);
         glfwSetKeyCallback (window, key_callback);
@@ -410,23 +412,29 @@ main :: () {
   print("Created % pieces, % vertices, % indices.\n", num_pieces(*board), piece_vertices.count, piece_indices.count);
   assert(num_pieces(*board) == num_pieces(*board, .WHITE) + num_pieces(*board, .BLACK));
 
-  create_array_object :: inline (indices : [] u32, vertices : [] $T) -> GLuint {
+  VertexSet :: struct {
+    vao : GLuint; // vertex array object
+    ebo : GLuint; // element buffer object
+    vbo : GLuint; // vertex buffer object
+  }
+  create_array_object :: inline (indices : [] u32, vertices : [] $T) -> VertexSet {
     using gl;
-    vao            : GLuint; // output
-    element_buffer : GLuint; // storage for triangle vertex indices
-    vertex_buffer  : GLuint; // storage for square vertices
-    glGenVertexArrays(1, *vao);
-    glBindVertexArray(vao);
+    vs : VertexSet;
+    // vao            : GLuint; // output
+    // element_buffer : GLuint; // storage for triangle vertex indices
+    // vertex_buffer  : GLuint; // storage for square vertices
+    glGenVertexArrays(1, *vs.vao);
+    glBindVertexArray(vs.vao);
 
-    glGenBuffers(1, *element_buffer);
-    glGenBuffers(1, *vertex_buffer);
+    glGenBuffers(1, *vs.ebo);
+    glGenBuffers(1, *vs.vbo);
 
     // @todo: replace GL_STATIC_DRAW with a variable so that we can add and remove pieces at will
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, element_buffer);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vs.ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.count*size_of(u32), indices.data, GL_STATIC_DRAW);
-    glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, vs.vbo);
     glBufferData(GL_ARRAY_BUFFER, vertices.count * size_of(T), vertices.data, GL_STATIC_DRAW);
-    return vao;
+    return vs;
   }
 
   compile_shader_program :: (basename : string) -> GLuint {
@@ -446,8 +454,8 @@ main :: () {
     return program;
   }
 
-  board_vao := create_array_object(vertex_indices, vertices);
-  glBindVertexArray(board_vao);
+  board_vs := create_array_object(vertex_indices, vertices);
+  glBindVertexArray(board_vs.vao);
   board_program := compile_shader_program("board");
 
   // UNIFORMS
@@ -471,7 +479,7 @@ main :: () {
 
   // ATTRIBUTES
   { // attributes for board_program
-    glBindVertexArray(board_vao);
+    glBindVertexArray(board_vs.vao);
     glUseProgram(board_program);
     // @note: need glVertexAttribIPointer when working with integer types, otherwise
     //        everything gets implicitly casted to float for some reason...
@@ -499,12 +507,12 @@ main :: () {
   //   Doesn't matter as long as I only have one big texture map for all the pieces.
 
   // allocate buffers and shit
-  piece_vao := create_array_object(piece_indices, piece_vertices);
-  glBindVertexArray(piece_vao);
+  piece_vs := create_array_object(piece_indices, piece_vertices);
+  glBindVertexArray(piece_vs.vao);
   piece_program := compile_shader_program("piece");
 
   { // attributes for piece_program
-    glBindVertexArray(piece_vao); // @note: needed, and not too sure why
+    glBindVertexArray(piece_vs.vao); // @note: needed, and not too sure why
     glUseProgram(piece_program);
 
     // @note: need glVertexAttribIPointer when working with integer types, otherwise
@@ -525,7 +533,7 @@ main :: () {
     glVertexAttribPointer(3, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tex);
   }
 
-  texture : GLuint;  // spritesheet of pieces, made in Inkscape to correspond with board size exactly
+  texture : GLuint; // spritesheet of pieces
   #if MSAA {
     texture2: GLuint;
     fbo     : GLuint;
@@ -622,12 +630,11 @@ main :: () {
     glfwPollEvents(); // automatically invokes the key_callback() function
 
     // SIMULATE
-    // @todo: make a board state and shit
+    // @todo: make a board state update when there is a move registered
 
     // GRAPHICS
     width, height : s32;
     glfwGetWindowSize(window, *width, *height);
-    // @todo: add other logic to resize renderbuffer if size has changed
 
     if to_redraw_pieces {
       print("Redrawing pieces this frame\n");
@@ -639,13 +646,13 @@ main :: () {
     glClear(GL_COLOR_BUFFER_BIT);
     { // draw board
       // glClearColor(1, 1, 1, 0);
-      glBindVertexArray(board_vao); // have to bind every frame before drawing
+      glBindVertexArray(board_vs.vao); // have to bind every frame before drawing
       glUseProgram(board_program); // board_program is a shading board_program, specifically
       glDrawElements(GL_TRIANGLES, xx vertex_indices.count, GL_UNSIGNED_INT, xx 0);
       check_gl_error();
     }
     { // draw pieces
-      glBindVertexArray(piece_vao); // have to bind every frame before drawing
+      glBindVertexArray(piece_vs.vao); // have to bind every frame before drawing
       glUseProgram(piece_program); // board_program is a shading board_program, specifically
       glDrawElements(GL_TRIANGLES, xx piece_indices.count, GL_UNSIGNED_INT, xx 0);
     }
