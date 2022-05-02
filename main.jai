@@ -21,6 +21,7 @@ time_sample_rate : s64 : 100; // for framerate sampling
 framerate : float = 0.;       // Written to and displayed on command
 
 board : Board;                // The internal game state
+NUM_SQUARES :: board.W * board.H;
 
 InputState :: enum {
   DEFAULT;
@@ -373,10 +374,17 @@ main :: () {
   piece_indices  : [..] u32;
   defer array_free(piece_vertices);
   defer array_free(piece_indices);
+  // @note: important to reserve as many vertices as we need so that the arrays never
+  //        get reallocated, and we can pass their pointers to OpenGL once and not think
+  //        about that again.
+  array_reserve(*piece_vertices, 4*(NUM_SQUARES+4)); // a piece for every square plus 4 should be enough
+  array_reserve(*piece_indices , 6*(NUM_SQUARES+4));
 
-  { // this will be a function for computing the vertex/index data for piece texture rectangles
-    array_reset(*piece_vertices);
-    array_reset(*piece_indices);
+
+  // actually updates piece_vertices and piece_indices, maybe name should change
+  update_piece_vertices :: (piece_vertices : *[..] PieceVertex, piece_indices : *[..] u32 ) { // this will be a function for computing the vertex/index data for piece texture rectangles
+    array_reset(piece_vertices);
+    array_reset(piece_indices);
     n := 0;
     for *piece : board.squares {
       if empty(<<piece) continue;
@@ -392,23 +400,25 @@ main :: () {
       h  := 2 / cast(float) square_dim.y;
 
       using piece;
-      array_add(*piece_vertices, make_piece_vertex(color, type, x  , y  , 0, 1)); // UL
-      array_add(*piece_vertices, make_piece_vertex(color, type, x  , y+h, 0, 0)); // LL
-      array_add(*piece_vertices, make_piece_vertex(color, type, x+w, y+h, 1, 0)); // LR
-      array_add(*piece_vertices, make_piece_vertex(color, type, x+w, y  , 1, 1)); // UR
+      // 4 corners of the square
+      array_add(piece_vertices, make_piece_vertex(color, type, x  , y  , 0, 1)); // UL
+      array_add(piece_vertices, make_piece_vertex(color, type, x  , y+h, 0, 0)); // LL
+      array_add(piece_vertices, make_piece_vertex(color, type, x+w, y+h, 1, 0)); // LR
+      array_add(piece_vertices, make_piece_vertex(color, type, x+w, y  , 1, 1)); // UR
 
-      off := cast(u32) (n*4);
+      off := cast(u32) (n*4); // index offset in piece_vertices
 
       // LL triangle
-      array_add(*piece_indices, off+0);
-      array_add(*piece_indices, off+1);
-      array_add(*piece_indices, off+2);
+      array_add(piece_indices, off+0);
+      array_add(piece_indices, off+1);
+      array_add(piece_indices, off+2);
       // UR triangle
-      array_add(*piece_indices, off+2);
-      array_add(*piece_indices, off+3);
-      array_add(*piece_indices, off+0);
+      array_add(piece_indices, off+2);
+      array_add(piece_indices, off+3);
+      array_add(piece_indices, off+0);
     }
   }
+  update_piece_vertices(*piece_vertices, *piece_indices);
   print("Created % pieces, % vertices, % indices.\n", num_pieces(*board), piece_vertices.count, piece_indices.count);
   assert(num_pieces(*board) == num_pieces(*board, .WHITE) + num_pieces(*board, .BLACK));
 
@@ -417,7 +427,7 @@ main :: () {
     ebo : GLuint; // element buffer object
     vbo : GLuint; // vertex buffer object
   }
-  create_array_object :: inline (indices : [] u32, vertices : [] $T) -> VertexSet {
+  create_vertex_set :: inline (indices : [] u32, vertices : [] $T) -> VertexSet {
     using gl;
     vs : VertexSet;
     // vao            : GLuint; // output
@@ -430,11 +440,15 @@ main :: () {
     glGenBuffers(1, *vs.vbo);
 
     // @todo: replace GL_STATIC_DRAW with a variable so that we can add and remove pieces at will
+    update_vs(*vs, indices, vertices);
+    return vs;
+  }
+  update_vs :: (vs : *VertexSet, indices : [] u32, vertices : [] $T) {
+    using gl;
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vs.ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.count*size_of(u32), indices.data, GL_STATIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, vs.vbo);
     glBufferData(GL_ARRAY_BUFFER, vertices.count * size_of(T), vertices.data, GL_STATIC_DRAW);
-    return vs;
   }
 
   compile_shader_program :: (basename : string) -> GLuint {
@@ -454,7 +468,7 @@ main :: () {
     return program;
   }
 
-  board_vs := create_array_object(vertex_indices, vertices);
+  board_vs := create_vertex_set(vertex_indices, vertices);
   glBindVertexArray(board_vs.vao);
   board_program := compile_shader_program("board");
 
@@ -507,7 +521,7 @@ main :: () {
   //   Doesn't matter as long as I only have one big texture map for all the pieces.
 
   // allocate buffers and shit
-  piece_vs := create_array_object(piece_indices, piece_vertices);
+  piece_vs := create_vertex_set(piece_indices, piece_vertices);
   glBindVertexArray(piece_vs.vao);
   piece_program := compile_shader_program("piece");
 
@@ -638,7 +652,9 @@ main :: () {
 
     if to_redraw_pieces {
       print("Redrawing pieces this frame\n");
-      // @todo: pull out piece drawing and do everything necessary here
+      update_piece_vertices(*piece_vertices, *piece_indices); // updates vertices using board
+      update_vs(*piece_vs, piece_indices, piece_vertices);    // reallocates and copies opengl objects.
+
       to_redraw_pieces = false;
     }
 
