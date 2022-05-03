@@ -101,8 +101,10 @@ char_callback :: (window : *GLFWwindow, char : u32) #c_call {
         s.count = 3;
         s.data  = algebra_buffer.data;
         print("String entered: %\n", s);
-        success, p := char_to_piece(s[0]);
-        success, p.loc = string_to_loc(advance(s, 1));
+        // success, p    := char_to_piece(s[0]);
+        // success, p.loc = string_to_loc(advance(s, 1));
+        success, p := algebra_to_piece(s);
+
         print("Piece: %\n", p);
         success = place(*board, p);
         if !success print("WARNING: Failed to place piece!\n");
@@ -357,17 +359,8 @@ main :: () {
   using PieceColor;
   using PieceType;
 
-  // logical pieces, or just the game state
-  // pieces : [..] Piece;
-  // defer array_free(pieces);
-  // array_reserve(*pieces, nsquares);
-  // array_add    (*pieces, .{WHITE, KING, .{1, 1}});
-  // array_add    (*pieces, .{BLACK, KING, .{2, 1}});
-
-  board = init_board();
-  // print("%\n", board.squares);
-  place(*board, .{WHITE, KING, .{1, 1}});
-  place(*board, .{BLACK, KING, .{2, 1}});
+  // set_position_from_file(*board, "positions/test.chess");
+  set_position_from_file(*board, "positions/starting.chess");
 
   // Create PieceVertex array from the other array
   piece_vertices : [..] PieceVertex;
@@ -379,7 +372,6 @@ main :: () {
   //        about that again.
   array_reserve(*piece_vertices, 4*(NUM_SQUARES+4)); // a piece for every square plus 4 should be enough
   array_reserve(*piece_indices , 6*(NUM_SQUARES+4));
-
 
   // actually updates piece_vertices and piece_indices, maybe name should change
   update_piece_vertices :: (piece_vertices : *[..] PieceVertex, piece_indices : *[..] u32 ) { // this will be a function for computing the vertex/index data for piece texture rectangles
@@ -443,6 +435,7 @@ main :: () {
     update_vs(*vs, indices, vertices);
     return vs;
   }
+
   update_vs :: (vs : *VertexSet, indices : [] u32, vertices : [] $T) {
     using gl;
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vs.ebo);
