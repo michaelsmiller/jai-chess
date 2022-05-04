@@ -112,38 +112,11 @@ get :: (using board : *Board, loc : Vector2(s32)) -> Piece {
   return squares[i];
 }
 
-print_board :: (using board : *Board) {
-  exit(1); // not ready yet
-  print("");
-}
-
-// just for fun, to practice for expansions.
-// In practice, most for expansions probably look something like this anyway.
-Lines :: struct {
-  content : string;
-}
-for_expansion :: (lines: *Lines, body: Code, flags: For_Flags) #expand {
-  #assert(flags == 0);
-  i := 0;
-  char : u8 = cast(u8) (#char "\n"); // default #char is a s64 instead of u8 for some reason
-  line_array := String.split(lines.content, char); // very good function
-
-  for line, line_idx : line_array {
-    `it       := line;
-    `it_index := line_idx;
-    #insert body;
-  }
-}
-
-set_position_from_file :: (using board : *Board, filename : string) {
+set_position_from_file :: (board : *Board, filename : string) {
+  print("Loading position from '%'\n", filename);
   init_board(board); // resets all squares
   s := File.read_entire_file(filename);
-  // @todo: loop through lines of file
-  done := false;
-  i2, i1 := 0, 0;
-  lines : Lines;
-  lines.content = s;
-
+  lines := String.split(s, cast(u8)(#char "\n"));
   for line, i : lines {
     if line.count == 0 continue;
 
@@ -156,5 +129,5 @@ set_position_from_file :: (using board : *Board, filename : string) {
 #scope_file
 
 #import "Basic"; // for string stuff if we start doing that here
-File :: #import "File";
-String :: #import "String";
+File :: #import "File"; // for reading files
+String :: #import "String"; // for split
