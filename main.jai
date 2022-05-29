@@ -275,14 +275,15 @@ main :: () {
 
   // Should correspond exactly with what is fed to vertex buffer
   // @todo: make some functions to easily load into vertex buffer given fewer inputs
-  Vertex :: struct {
+  SquareVertex :: struct {
     x, y : float;        // coords
     tx, ty : float;      // texture coordinates
     ix, iy : GLint;      // index of what square this is on
+    selected : bool = false; // highlighted
   }
 
-  make_vertex :: inline (x : float, y : float, tx : float, ty : float, ix : GLint, iy : GLint) -> Vertex {
-    v : Vertex;
+  make_vertex :: inline (x : float, y : float, tx : float, ty : float, ix : GLint, iy : GLint) -> SquareVertex {
+    v : SquareVertex;
     v.x = x;
     v.y = y;
     v.tx = tx;
@@ -299,7 +300,7 @@ main :: () {
   square_dim :: Vector2(s32).{nsquare_width, nsquare_height};
   nsquares :: nsquare_width*nsquare_height;
 
-  vertices       : [4*nsquares] Vertex; // 4 vertices per square
+  vertices       : [4*nsquares] SquareVertex; // 4 vertices per square
   vertex_indices : [6*nsquares] GLuint; // 2 triangles per square, each has 3 vertices
   ivert := 0;
   for i : 0..square_dim.x-1 {
@@ -334,6 +335,12 @@ main :: () {
       vertex_indices[6*ivert+5] = cast(u32) (4*ivert+3);
     }
   }
+
+  // @todo: delete temporary code, pull out into function as well
+  vertices[0].selected = true;
+  vertices[1].selected = true;
+  vertices[2].selected = true;
+  vertices[3].selected = true;
 
   PieceVertex :: struct {
     using piece : Piece;
@@ -470,6 +477,9 @@ main :: () {
 
       border_color := Color.{0.0, 0.0, 0.0}; // black for now
       border_width :  float = 0.01; // in units of square width
+
+      selection_color := Color.{1.0, 1.0, 0.0}; // yellow
+      selection_width : float = 0.04;
   }
   board_look : BoardShaderUniforms;
 
@@ -477,8 +487,10 @@ main :: () {
   set_uniform(board_program, "whiteColor",  board_look.white_color);
   set_uniform(board_program, "borderColor", board_look.border_color);
   set_uniform(board_program, "borderWidth", board_look.border_width);
+  set_uniform(board_program, "selectionColor", board_look.selection_color);
+  set_uniform(board_program, "selectionWidth", board_look.selection_width);
   set_uniform(board_program, "squareDim",   square_dim);
-  set_uniform(board_program, "t",  cast(float) 0.);
+  set_uniform(board_program, "t",           cast(float) 0.);
   print("Set uniforms successfully.\n");
 
   // ATTRIBUTES
@@ -487,8 +499,8 @@ main :: () {
     glUseProgram(board_program);
     // @note: need glVertexAttribIPointer when working with integer types, otherwise
     //        everything gets implicitly casted to float for some reason...
-    offset : *Vertex : null; // giving OpenGL the right offsets (basically relative pointers)
-    vsize : GLuint = size_of(Vertex);
+    offset : *SquareVertex : null; // giving OpenGL the right offsets (basically relative pointers)
+    vsize : GLuint = size_of(SquareVertex);
     vi : u32 = 0;
     // The vertices and their data
     glEnableVertexAttribArray(vi);
@@ -501,6 +513,10 @@ main :: () {
     // The indices of the square
     glEnableVertexAttribArray(vi);
     glVertexAttribIPointer(vi, 2, GL_INT, vsize, cast(*void) *offset.ix);
+    vi += 1;
+
+    glEnableVertexAttribArray(vi);
+    glVertexAttribIPointer(vi, 1, GL_INT, vsize, cast(*void) *offset.selected);
     vi += 1;
   }
 
