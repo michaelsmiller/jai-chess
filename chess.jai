@@ -18,11 +18,22 @@ PieceType :: enum s32 {
 Piece :: struct {
   color     : PieceColor = .NONE;
   type      : PieceType  = .EMPTY;
-  loc       : Vector2(s32); // position on [0,7]^2
+}
+operator == :: (a : Piece, b : Piece) -> bool {
+  return a.color == b.color && a.type == b.type;
 }
 
-empty :: (using p : Piece) -> bool {
-  return type == .EMPTY;
+EMPTY_PIECE : Piece : .{.NONE, .EMPTY};
+
+Location :: Vector2(s32); // alias for location
+
+Square :: struct {
+  using piece : Piece = .{.NONE, .EMPTY};
+  loc : Location      = .{0, 0};
+}
+
+empty :: (using square : Square) -> bool {
+  return piece  == EMPTY_PIECE;
 }
 
 char_to_piece :: (char : u8) -> bool, Piece {
@@ -56,16 +67,17 @@ string_to_loc :: (s : string) -> bool, Vector2(s32) {
   return true, v;
 }
 
-algebra_to_piece :: (s : string) -> bool, Piece {
+algebra_to_piece_loc :: (s : string) -> bool, Piece, Location {
   p : Piece;
-  if s.count < 3 return false, p;
+  loc : Location;
+  if s.count < 3 return false, p, loc;
 
   success := true;
   success, p = char_to_piece(s[0]);
-  if !success return false, p;
+  if !success return false, p, loc;
 
-  success, p.loc = string_to_loc(String.slice(s, 1, 2));
-  return success, p;
+  success, loc = string_to_loc(String.slice(s, 1, 2));
+  return success, p, loc;
 }
 
 // @todo: write function to create piece from char_to_piece() and string_to_loc()
@@ -73,16 +85,15 @@ algebra_to_piece :: (s : string) -> bool, Piece {
 // holds entire state
 Board_ :: struct(W : s32, H : s32) {
   turn    : PieceColor   = .WHITE;
-  squares : [W*H] Piece;
+  squares : [W*H] Square;
 }
 Board :: Board_(8, 8);
 
 
 init_board :: (using board : *Board) {
-  for *piece, i : squares {
-    using piece;
-    p : Piece;
-    <<piece = p; // reset piece
+  for *square, i : squares {
+    using square;
+    square.piece = EMPTY_PIECE;
     loc.x = cast(s32)i % board.H;
     loc.y = cast(s32)i / board.H;
   }
@@ -90,26 +101,28 @@ init_board :: (using board : *Board) {
 
 num_pieces :: (board : *Board, color : PieceColor = .NONE) -> s32 {
   count : s32 = 0;
-  for piece : board.squares {
-    if !empty(piece) && (color == .NONE || piece.color == color) count += 1;
-  }
+  for square : board.squares
+    if !empty(square) && (color == .NONE || square.piece.color == color)
+      count += 1;
   return count;
 }
 
-place :: (using board : *Board, piece : Piece, check_exists : bool = true) -> bool {
-  i := piece.loc.y * board.H + piece.loc.x;
-  if piece.type == .EMPTY return false;
+place :: (using board : *Board, piece : Piece, loc : Location, check_exists : bool = true) -> bool {
+  if piece == EMPTY_PIECE return false;
+
+  i := loc.y * board.H + loc.x;
   if i < 0 || i >= board.H * board.W return false; // out of bounds check
-  square := squares.data + i;
-  if !empty(<<square) && check_exists print("WARNING: piece % being overwritten!\n", <<square);
-  memcpy(square, *piece, size_of(Piece));
+  square := *squares[i];
+  if !empty(square) && check_exists print("WARNING: piece % being overwritten!\n", square);
+  square.piece = piece;
+  // memcpy(square, *piece, size_of(Piece)); // should also work
 
   return true; // success
 }
 
-get :: (using board : *Board, loc : Vector2(s32)) -> Piece {
+get :: (using board : *Board, loc : Location) -> Piece {
   i := loc.y * board.H + loc.x;
-  return squares[i];
+  return squares[i].piece;
 }
 
 set_position_from_file :: (board : *Board, filename : string) {
@@ -120,9 +133,9 @@ set_position_from_file :: (board : *Board, filename : string) {
   for line, i : lines {
     if line.count == 0 continue;
 
-    success, p := algebra_to_piece(line);
+    success, p, loc := algebra_to_piece_loc(line);
     if !success {print("Error in converting piece '%'\n", line); exit(1);}
-    place(board, p, false);
+    place(board, p, loc, false);
   }
 }
 

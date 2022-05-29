@@ -21,7 +21,7 @@ time_sample_rate : s64 : 100; // for framerate sampling
 framerate : float = 0.;       // Written to and displayed on command
 
 board : Board;                // The internal game state
-NUM_SQUARES :: board.W * board.H;
+NUM_SQUARES :: board.W * board.H; // should be 64
 
 InputState :: enum {
   DEFAULT;
@@ -101,12 +101,10 @@ char_callback :: (window : *GLFWwindow, char : u32) #c_call {
         s.count = 3;
         s.data  = algebra_buffer.data;
         print("String entered: %\n", s);
-        // success, p    := char_to_piece(s[0]);
-        // success, p.loc = string_to_loc(advance(s, 1));
-        success, p := algebra_to_piece(s);
+        success, p, loc := algebra_to_piece_loc(s);
 
         print("Piece: %\n", p);
-        success = place(*board, p);
+        success = place(*board, p, loc);
         if !success print("WARNING: Failed to place piece!\n");
         if success to_redraw_pieces = true;
         input_state = .DEFAULT;
@@ -338,10 +336,9 @@ main :: () {
   }
 
   PieceVertex :: struct {
-    color     : PieceColor;
-    type      : PieceType;
-    pos       : Vector2(float);
-    tex       : Vector2(float);
+    using piece : Piece;
+    pos         : Vector2(float);
+    tex         : Vector2(float);
   }
 
   make_piece_vertex :: (color : PieceColor, type : PieceType, px : float, py : float, tx : float, ty : float) -> PieceVertex {
