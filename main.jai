@@ -12,6 +12,7 @@ STB :: #import "stb_image"; // for reading pngs into memory
 
 MSAA :: false;
 time_sample_rate : s64 : 100; // for framerate sampling
+window_size :: Vector2(s32).{800, 800};
 
 // Global state
 //
@@ -24,6 +25,7 @@ board            : Board;       // The internal game state
 NUM_SQUARES :: board.W * board.H; // should be 64
 
 square_selections : [NUM_SQUARES] s32; // The state of which squares are selected
+selection_changed := false;
 
 InputState :: enum {
   DEFAULT;
@@ -83,6 +85,39 @@ framebuffer_size_callback :: (window : *GLFWwindow, width : s32, height : s32) #
   // push_context new_context {
     glViewport(0, 0, xx width, xx height);
   // }
+}
+
+mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: s32) #c_call {
+  using gl;
+  new_context : Context;
+  push_context new_context {
+    if !(button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) return;
+
+    x, y : float64; // pixels, graphically arranged
+    glfwGetCursorPos(window, *x, *y);
+    y = window_size.y - 1 - y; // make coordinates cartesian
+
+    // @todo: make window_size a mutable variable that updates with the changing window
+    pixels_per_square : Vector2(s32);
+    pixels_per_square.x = window_size.x / board.W;
+    pixels_per_square.y = window_size.y / board.H;
+
+    square : Location;
+    square.x = (cast(s32)x) / pixels_per_square.x;
+    square.y = (cast(s32)y) / pixels_per_square.y;
+    // print("Cursor: %, %\n", square.x, square.y);
+    i := square.x + board.W * square.y;
+    if square_selections[i] != 1 {
+      // deselect all squares other than the new one
+      for j : 0..NUM_SQUARES-1 {
+        curr := square_selections[j];
+        if curr > 0 square_selections[j] = 0;
+      }
+      square_selections[i] = 1;
+    }
+    else square_selections[i] = 0;
+    selection_changed = true; // marks for flushing the uniform this frame
+  }
 }
 
 char_callback :: (window : *GLFWwindow, char : u32) #c_call {
@@ -244,7 +279,6 @@ main :: () {
   startup_timer : Timer;
   start_timer(*startup_timer);
 
-  window_size :: Vector2(s32).{800, 800};
   if !glfwInit() error("glfwInit() failed");
   NSAMPLES : s32 : 4;
   glfwWindowHint(GLFW_SAMPLES, NSAMPLES); // for super-sampling!
@@ -253,6 +287,7 @@ main :: () {
   glfwMakeContextCurrent(window);
 
   // callbacks
+  glfwSetMouseButtonCallback(window, mouse_button_callback);
   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
   glfwSetKeyCallback(window, key_callback);
   glfwSwapInterval(1);
@@ -476,7 +511,8 @@ main :: () {
       border_color := Color.{0.0, 0.0, 0.0}; // black for now
       border_width :  float = 0.01; // in units of square width
 
-      selection_color := Color.{1.0, 1.0, 0.0}; // yellow
+      selection_color1 := Color.{1.0, 1.0, 0.0}; // yellow
+      selection_color2 := Color.{1.0, 0.0, 1.0}; // purple
       selection_width : float = 0.04;
   }
   board_look : BoardShaderUniforms;
@@ -485,11 +521,11 @@ main :: () {
   set_uniform(board_program, "whiteColor",  board_look.white_color);
   set_uniform(board_program, "borderColor", board_look.border_color);
   set_uniform(board_program, "borderWidth", board_look.border_width);
-  set_uniform(board_program, "selectionColor", board_look.selection_color);
+  set_uniform(board_program, "selectionColor1", board_look.selection_color1);
+  set_uniform(board_program, "selectionColor2", board_look.selection_color2);
   set_uniform(board_program, "selectionWidth", board_look.selection_width);
   set_uniform(board_program, "squareDim",   square_dim);
   set_uniform(board_program, "t",           cast(float) 0.);
-  square_selections[0] = 1;
   set_uniform(board_program, "selected", array_view(square_selections, 0));
   print("Set uniforms successfully.\n");
 
@@ -658,6 +694,11 @@ main :: () {
       update_vs(*piece_vs, piece_indices, piece_vertices);    // reallocates and copies opengl objects.
 
       to_redraw_pieces = false;
+    }
+
+    if selection_changed {
+      set_uniform(board_program, "selected", array_view(square_selections, 0));
+      selection_changed = false;
     }
 
     // draw to backbuffer

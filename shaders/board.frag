@@ -15,7 +15,8 @@ flat in ivec2 squareIndex;
 uniform float borderWidth; // units are in square widths
 uniform float selectionWidth;
 uniform vec3  borderColor;
-uniform vec3  selectionColor;
+uniform vec3  selectionColor1; // User selects a square
+uniform vec3  selectionColor2; // squares highlighted with a different color to demonstrate something
 
 uniform ivec2 squareDim = ivec2(8, 8);
 uniform int selected[8*8];
@@ -53,10 +54,14 @@ void main() {
   // logic for if the square is selected;
   bool isSelected = false;
   // if (squareSelected == 1) {
-  if (selected[i] == 1) {
+  if (selected[i] > 0) {
     isSelected = inBorder(texCoords, selectionWidth);
-    if (isSelected)
-      gl_FragColor.rgb = selectionColor;
+    if (isSelected) {
+      if (selected[i] == 1)
+        gl_FragColor.rgb = selectionColor1;
+      else if (selected[i] == 2)
+        gl_FragColor.rgb = selectionColor2;
+    }
   }
 
   // everything below is to play with dynamism
