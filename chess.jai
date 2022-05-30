@@ -120,6 +120,29 @@ place :: (using board : *Board, piece : Piece, loc : Location, check_exists : bo
   return true; // success
 }
 
+// @note: needs to be reversible, so this information is necessary
+Move :: struct {
+  square1 : Square;
+  square2 : Square;
+}
+
+other_color :: (color : PieceColor) -> PieceColor {
+  if color == {
+    case .WHITE; return .BLACK;
+    case .BLACK; return .WHITE;
+  }
+  return .NONE;
+}
+
+move :: (using board : *Board, using move : *Move, check : bool = false) -> bool {
+  i1 := square1.loc.x + square1.loc.y * board.W;
+  i2 := square2.loc.x + square2.loc.y * board.W;
+  squares[i1].piece = EMPTY_PIECE;
+  squares[i2].piece = square1.piece;
+  board.turn = other_color(turn); // change colors
+  return true;
+}
+
 get :: (using board : *Board, loc : Location) -> Piece {
   i := loc.y * board.H + loc.x;
   return squares[i].piece;
@@ -139,8 +162,78 @@ set_position_from_file :: (board : *Board, filename : string) {
   }
 }
 
+// Chess rules
+
+is_pseudo_legal :: (using board : *Board, using move : *Move) -> bool {
+  p1 := square1.piece;
+  p2 := square2.piece;
+  // print("% -> %\n  % to move\n", square1, square2, board.turn);
+
+  if p1 == EMPTY_PIECE return false; // there needs to be a piece moving
+  if p1.color != turn  return false; // needs to be the piece's color's turn
+  if p1.color == p2.color return false; // Color can't take its own color
+
+  loc1 := square1.loc;
+  loc2 := square2.loc;
+  diff := loc2 - loc1;
+  dx := Math.abs(diff.x);
+  dy := Math.abs(diff.y);
+  direction := diff / max(dx, dy);
+  color_multiplier := ifx p1.color == .WHITE then 1 else -1;
+
+  // deal with knight first to think of others as rows, columns, and diagonal movements
+  if p1.type == .KNIGHT
+    return (dx == 1 && dy == 2) || (dx == 2 && dy == 1);
+
+  if square1.loc == square2.loc return false;     // Can't move to same square
+  if dx != 0 && dy != 0 && dx != dy return false; // Either diagonals or on a main axis
+
+  // checks every space between 2 squares, exclusive, for the existence of a piece
+  piece_between :: (using board : *Board, loc1 : Location, loc2 : Location) -> bool {
+    diff := loc2 - loc1;
+    n := max(Math.abs(diff.x), Math.abs(diff.y));
+    if n == 1 return false;
+
+    assert(n != 0);
+    direction := diff / n; // The quantum of change
+    v := loc1 + direction;
+    while v != loc2 {
+      if get(board, v) != EMPTY_PIECE return true;
+      v = v + direction;
+    }
+    return false;
+  }
+
+  if piece_between(board, loc1, loc2) return false; // check for piece in the way
+
+  if p1.type == {
+    case .KING; return dx <= 1 && dy <= 1;
+    case .PAWN;
+      if direction.y != color_multiplier return false; // pawn can only move up for white and down for black
+      // diagonal pawn move must be taking a piece
+      if dx == 1 {
+        if dy != 1 return false;
+        return p2 != EMPTY_PIECE;
+      }
+      else if dx != 0 return false;
+      // dx == 0
+      if dy > 2 return false;
+      else if dy == 2
+        return (p1.color == .WHITE && loc1.y == 1) || (p1.color == .BLACK && loc1.y == 6);
+      else return true;
+
+    case .QUEEN; #through;
+    case .ROOK;  #through;
+    case .BISHOP;  return true;
+    case; assert(false); // should never reach this
+  }
+
+  return true;
+}
+
 #scope_file
 
 #import "Basic"; // for string stuff if we start doing that here
 File :: #import "File"; // for reading files
 String :: #import "String"; // for split
+Math :: #import "Math";

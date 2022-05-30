@@ -108,12 +108,28 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
     // print("Cursor: %, %\n", square.x, square.y);
     i := square.x + board.W * square.y;
     if square_selections[i] != 1 {
-      // deselect all squares other than the new one
+      // deselect all squares other than the new one, and mark if one was selected
+      prev : Square;
       for j : 0..NUM_SQUARES-1 {
         curr := square_selections[j];
+        if curr == 1 prev = board.squares[j];
         if curr > 0 square_selections[j] = 0;
       }
-      square_selections[i] = 1;
+      // This represents a movement
+      if prev.piece != EMPTY_PIECE {
+        curr := board.squares[i];
+        m : Move;
+        m.square1 = prev;
+        m.square2 = curr;
+        if is_pseudo_legal(*board, *m) {
+          move(*board, *m);
+          to_redraw_pieces = true;
+        }
+        else print("Illegal move!\n");
+      }
+      // Just selecting a square
+      else
+        square_selections[i] = 1;
     }
     else square_selections[i] = 0;
     selection_changed = true; // marks for flushing the uniform this frame
@@ -689,7 +705,7 @@ main :: () {
     glfwGetWindowSize(window, *width, *height);
 
     if to_redraw_pieces {
-      print("Redrawing pieces this frame\n");
+      // print("Redrawing pieces this frame\n");
       update_piece_vertices(*piece_vertices, *piece_indices); // updates vertices using board
       update_vs(*piece_vs, piece_indices, piece_vertices);    // reallocates and copies opengl objects.
 

@@ -1,5 +1,15 @@
 lerp :: Math.lerp;
 
+// @todo: there must be a library function for this
+sgn :: (x : $T) -> T #modify {
+  ti := cast(*Type_Info)T;
+  return ti.type == .INTEGER;
+}{
+  if x < 0 return -1;
+  if x == 0 return 0;
+  return 1;
+}
+
 
 Vector2 :: struct($T : Type) {
   x, y : T;
@@ -26,7 +36,7 @@ make_vector3 :: inline (x : $T, y : T, z: T) -> Vector3(T) {
   return v;
 }
 
-repeat :: ($n : int, code : Code) #expand {
+repeat :: (code : Code, $n : int) #expand {
   #assert n > 1;
   #if n == 2 {
     #insert code;
@@ -47,16 +57,39 @@ repeat :: ($n : int, code : Code) #expand {
 }
 
 operator + :: (a : Vector3($T), b : Vector3(T)) -> Vector3(T) {
-  c : Vector3(T);
+  c : Vector3(T) = ---;
   c.x = a.x + b.x;
   c.y = a.y + b.y;
   c.z = a.z + b.z;
   return c;
 }
 
+operator - :: (a : Vector2($T), b : Vector2(T)) -> Vector2(T) {
+  v : Vector2(T) = ---;
+  v.x = a.x - b.x;
+  v.y = a.y - b.y;
+  return v;
+}
+
+operator + :: (a : Vector2($T), b : Vector2(T)) -> Vector2(T) {
+  v : Vector2(T) = ---;
+  v.x = a.x + b.x;
+  v.y = a.y + b.y;
+  return v;
+}
+
+operator == :: (a : Vector2($T), b : Vector2(T)) -> bool {
+  return a.x == b.x && a.y == b.y;
+}
+
+operator / :: (v : Vector2($T), s : T) -> Vector2(T) {
+  w : Vector2(T) = ---;
+  w.x = v.x / s;
+  w.y = v.y / s;
+  return w;
+}
+
 // scalar multiplication and division:
-// @note I don't think scalar division is ever a good idea, but if gets put in
-//       then please make it check for 0
 
 operator * :: (v : Vector3($T), a : $S) -> Vector3(T) #symmetric #modify {
   // Only allow this to polymorph for scalars
