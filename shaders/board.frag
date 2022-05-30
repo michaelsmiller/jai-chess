@@ -9,7 +9,6 @@ precision mediump float;
 in vec3 vertColor; // the background color of the square
 in vec2 texCoords; // texture coordinates within square
 flat in ivec2 squareIndex;
-flat in int   squareSelected;
 
 // this is the last fragment shader so only output is gl_FragColor
 
@@ -19,6 +18,7 @@ uniform vec3  borderColor;
 uniform vec3  selectionColor;
 
 uniform ivec2 squareDim = ivec2(8, 8);
+uniform int selected[8*8];
 
 uniform float t = 0.;
 uniform float period = 3; // in seconds
@@ -45,9 +45,15 @@ void main() {
   else
     gl_FragColor.rgb = vertColor;
 
+  // @note: This index should go from row 1 to row 8 in algebraic notation
+  //        Right now, the squareIndex.y is ordered graphically rather than algebraically,
+  //        so it gets reversed.
+  int i = (squareDim.y - 1 - squareIndex.y) * squareDim.x + squareIndex.x;
+
   // logic for if the square is selected;
   bool isSelected = false;
-  if (squareSelected == 1) {
+  // if (squareSelected == 1) {
+  if (selected[i] == 1) {
     isSelected = inBorder(texCoords, selectionWidth);
     if (isSelected)
       gl_FragColor.rgb = selectionColor;

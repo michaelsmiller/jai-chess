@@ -11,17 +11,19 @@ STB :: #import "stb_image"; // for reading pngs into memory
 #load "chess.jai"; // board/piece state and game logic
 
 MSAA :: false;
+time_sample_rate : s64 : 100; // for framerate sampling
 
 // Global state
 //
-toggle           := false;    // for debugging
-to_redraw_pieces := false;    // Whether we need to recreate piece vertices and redraw this frame.
-nframes : s64 = 0;            // number of frames that have passed up to this point
-time_sample_rate : s64 : 100; // for framerate sampling
-framerate : float = 0.;       // Written to and displayed on command
+toggle           := false;      // for debugging
+to_redraw_pieces := false;      // Whether we need to recreate piece vertices and redraw this frame.
+nframes          : s64 = 0;     // number of frames that have passed up to this point
+framerate        : float = 0.;  // Written to and displayed on command
 
-board : Board;                // The internal game state
+board            : Board;       // The internal game state
 NUM_SQUARES :: board.W * board.H; // should be 64
+
+square_selections : [NUM_SQUARES] s32; // The state of which squares are selected
 
 InputState :: enum {
   DEFAULT;
@@ -211,6 +213,9 @@ set_uniform :: (program : GLuint, cname : *u8, value : $T) {
   else #if T == [4] float {
     glUniform4f(loc, value[0], value[1], value[2], value[3]);
   }
+  else #if T == [] s32 {
+    glUniform1iv(loc, cast(GLsizei)value.count, value.data);
+  }
   else {
     error("set_uniform: type '%' not supported yet!\nShould probably add it\n", T);
   }
@@ -279,7 +284,6 @@ main :: () {
     x, y : float;        // coords
     tx, ty : float;      // texture coordinates
     ix, iy : GLint;      // index of what square this is on
-    selected : bool = false; // highlighted
   }
 
   make_vertex :: inline (x : float, y : float, tx : float, ty : float, ix : GLint, iy : GLint) -> SquareVertex {
@@ -335,12 +339,6 @@ main :: () {
       vertex_indices[6*ivert+5] = cast(u32) (4*ivert+3);
     }
   }
-
-  // @todo: delete temporary code, pull out into function as well
-  vertices[0].selected = true;
-  vertices[1].selected = true;
-  vertices[2].selected = true;
-  vertices[3].selected = true;
 
   PieceVertex :: struct {
     using piece : Piece;
@@ -491,6 +489,8 @@ main :: () {
   set_uniform(board_program, "selectionWidth", board_look.selection_width);
   set_uniform(board_program, "squareDim",   square_dim);
   set_uniform(board_program, "t",           cast(float) 0.);
+  square_selections[0] = 1;
+  set_uniform(board_program, "selected", array_view(square_selections, 0));
   print("Set uniforms successfully.\n");
 
   // ATTRIBUTES
@@ -513,10 +513,6 @@ main :: () {
     // The indices of the square
     glEnableVertexAttribArray(vi);
     glVertexAttribIPointer(vi, 2, GL_INT, vsize, cast(*void) *offset.ix);
-    vi += 1;
-
-    glEnableVertexAttribArray(vi);
-    glVertexAttribIPointer(vi, 1, GL_INT, vsize, cast(*void) *offset.selected);
     vi += 1;
   }
 

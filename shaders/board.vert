@@ -4,13 +4,11 @@
 in vec2 pos;
 in vec2 vertTexCoords; // for passing to fragment shader
 in ivec2 vSquareIndex;
-in int   vSelected;
 
 out vec3 vertColor;
 out vec2 texCoords;
 // 'flat' = not to try to interpolate
 flat out ivec2 squareIndex;
-flat out int   squareSelected;
 
 
 uniform vec3 blackColor;
@@ -22,7 +20,6 @@ void main() {
 
   texCoords = vertTexCoords;
   squareIndex = vSquareIndex;
-  squareSelected = vSelected;
 
   int isWhite = (int(squareIndex.x%2==0) ^ int(squareIndex.y%2==0)); // 0 or 1
   if (isWhite == 0)
