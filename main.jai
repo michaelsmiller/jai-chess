@@ -102,18 +102,18 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
     pixels_per_square.x = window_size.x / board.W;
     pixels_per_square.y = window_size.y / board.H;
 
-    square : Location;
-    square.x = (cast(s32)x) / pixels_per_square.x;
-    square.y = (cast(s32)y) / pixels_per_square.y;
-    // print("Cursor: %, %\n", square.x, square.y);
-    i := square.x + board.W * square.y;
+    location : Location;
+    location.x = (cast(s32)x) / pixels_per_square.x;
+    location.y = (cast(s32)y) / pixels_per_square.y;
+
+    i := location.x + board.W * location.y;
     if square_selections[i] != 1 {
       // deselect all squares other than the new one, and mark if one was selected
       prev : Square;
       for j : 0..NUM_SQUARES-1 {
         curr := square_selections[j];
         if curr == 1 prev = board.squares[j];
-        if curr > 0 square_selections[j] = 0;
+        if curr > 0  square_selections[j] = 0;
       }
       // This represents a movement
       if prev.piece != EMPTY_PIECE {
@@ -128,10 +128,26 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
         else print("Illegal move!\n");
       }
       // Just selecting a square
-      else
+      else {
         square_selections[i] = 1;
+        // if this square has a piece display all the possible moves
+        pseudo_moves : [..] Move;
+        square1 := board.squares[i];
+        get_pseudo_legal_moves(*board, *square1, *pseudo_moves);
+        for *move : pseudo_moves {
+          loc := move.square2.loc;
+          j := loc.x + board.W * loc.y;
+          square_selections[j] = 2; // secondary
+        }
+        array_reset(*pseudo_moves);
+      }
     }
-    else square_selections[i] = 0;
+    else {// square_selections[i] = 0;
+      for j : 0..NUM_SQUARES-1 {
+        curr := square_selections[j];
+        if curr > 0  square_selections[j] = 0;
+      }
+    }
     selection_changed = true; // marks for flushing the uniform this frame
   }
 }

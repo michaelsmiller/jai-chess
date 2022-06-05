@@ -143,9 +143,16 @@ move :: (using board : *Board, using move : *Move, check : bool = false) -> bool
   return true;
 }
 
-get :: (using board : *Board, loc : Location) -> Piece {
+get :: inline (using board : *Board, loc : Location) -> Piece {
   i := loc.y * board.H + loc.x;
   return squares[i].piece;
+}
+
+get_square :: inline (using board : *Board, loc : Location) -> Square {
+  square: Square;
+  square.loc = loc;
+  square.piece = get(board, loc);
+  return square;
 }
 
 set_position_from_file :: (board : *Board, filename : string) {
@@ -163,6 +170,58 @@ set_position_from_file :: (board : *Board, filename : string) {
 }
 
 // Chess rules
+
+get_pseudo_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) -> bool {
+  location  := square.loc;
+  piece     := square.piece;
+  direction := cast(s32)(ifx piece.color == .WHITE then 1 else -1);
+
+  in_bounds :: (loc : Location) -> bool {
+    return loc.x >= 0 && loc.x < Board.W && loc.y >= 0 && loc.y < Board.H;
+  }
+
+  check_move_and_add :: (board : *Board, square1 : *Square, loc : Location,
+                             moves : *[..] Move, allow_piece : bool, allow_no_piece : bool = true) -> bool {
+    if !in_bounds(loc) return false; // @todo: remove this check if done before this function
+    square2 := get_square(board, loc);
+    piece2  := square2.piece;
+    if !allow_no_piece && (piece2 == EMPTY_PIECE || piece2.color == square1.piece.color) return false;
+    if piece2 == EMPTY_PIECE || (allow_piece && piece2.color != square1.piece.color) {
+      move : Move;
+      move.square1 = <<square1;
+      move.square2 =   square2;
+      array_add(moves, move);
+      return true;
+    }
+    return false;
+  }
+
+  initial_count := moves.count;
+  if piece.type == {
+    case .PAWN;
+      loc   := location;
+      loc.y += direction; check_move_and_add(board, square, loc, moves, false);
+      loc.x = location.x + 1; check_move_and_add(board, square, loc, moves, true, false);
+      loc.x = location.x - 1; check_move_and_add(board, square, loc, moves, true, false);
+      loc = location;
+      if    (piece.color == .WHITE && location.y == 1)
+         || (piece.color == .BLACK && location.y == Board.H-2) {
+        loc.y += 2*direction; check_move_and_add(board, square, loc, moves, false);
+      }
+    case .ROOK;
+    case .BISHOP;
+    case .KNIGHT;
+    case .QUEEN;
+    case .KING;
+  }
+  count := moves.count - initial_count;
+  if count > 0 {
+    print("Found and added % moves.\n", count);
+  }
+  else print("Found 0 legal moves.\n");
+
+  return count > 0;
+}
 
 is_pseudo_legal :: (using board : *Board, using move : *Move) -> bool {
   p1 := square1.piece;
