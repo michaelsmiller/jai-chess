@@ -84,8 +84,9 @@ algebra_to_piece_loc :: (s : string) -> bool, Piece, Location {
 
 // holds entire state
 Board_ :: struct(W : s32, H : s32) {
-  turn    : PieceColor   = .WHITE;
   squares : [W*H] Square;
+  turn    : PieceColor   = .WHITE;
+  move_history : [..] Move;
 }
 Board :: Board_(8, 8);
 
@@ -125,6 +126,9 @@ Move :: struct {
   square1 : Square;
   square2 : Square;
 }
+operator == :: (m1 : Move, m2 : Move) -> bool {
+  return m1.square1 == m2.square1 && m1.square2 == m2.square2;
+}
 
 other_color :: (color : PieceColor) -> PieceColor {
   if color == {
@@ -134,16 +138,20 @@ other_color :: (color : PieceColor) -> PieceColor {
   return .NONE;
 }
 
-make_move :: (using board : *Board, using move : *Move, check : bool = false) -> bool {
+make_move :: (using board : *Board, using move : *Move) -> bool {
   i1 := square1.loc.x + square1.loc.y * board.W;
   i2 := square2.loc.x + square2.loc.y * board.W;
   squares[i1].piece = EMPTY_PIECE;
   squares[i2].piece = square1.piece;
   board.turn = other_color(turn); // change colors
+
+  array_add(*move_history, <<move);
   return true;
 }
 
-reverse_move :: (using board : *Board, using move : *Move, check : bool = false) -> bool {
+reverse_move :: (using board : *Board) -> bool {
+  move := pop(*move_history);
+  using move;
   i1 := square1.loc.x + square1.loc.y * board.W;
   i2 := square2.loc.x + square2.loc.y * board.W;
   squares[i1].piece = square1.piece;
@@ -203,18 +211,44 @@ is_in_check :: (using board : *Board, color : PieceColor) -> bool {
   return false;
 }
 
+is_checkmate :: (board : *Board) -> bool {
+  color := board.turn;
+  moves : [..] Move;
+  defer array_free(moves);
+  in_check := is_in_check(board, color);
+  if in_check print("% in check: %\n", color, is_in_check(board, color));
+  if !in_check return false;
+
+  checkmate := !get_legal_moves(board, *moves);
+  return checkmate;
+}
+
+get_legal_moves :: (board : *Board, moves : *[..] Move) -> bool {
+  count0 := moves.count;
+  for *square : board.squares {
+    if square.piece.color == board.turn
+      get_legal_moves(board, square, moves);
+  }
+  count := moves.count - count0;
+  return count > 0;
+}
+
 get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) -> bool {
   location  := square.loc;
   piece     := square.piece;
   color_direction := cast(s32)(ifx piece.color == .WHITE then 1 else -1);
+
+  // @todo: Including this stopped an assert from triggering where get_legal_moves() was being
+  //        called on an empty square, so really the source of that problem should be fixed instead.
+  if piece == EMPTY_PIECE return false;
 
   in_bounds :: (loc : Location) -> bool {
     return loc.x >= 0 && loc.x < Board.W && loc.y >= 0 && loc.y < Board.H;
   }
 
   check_move_and_add :: (board : *Board, square1 : *Square, loc : Location,
-                             moves : *[..] Move, allow_piece : bool, allow_no_piece : bool = true) -> bool {
-    if !in_bounds(loc) return false; // @todo: remove this check if done before this function
+                         moves : *[..] Move, allow_piece : bool, allow_no_piece : bool = true) -> bool {
+    if !in_bounds(loc) return false;
     square2 := get_square(board, loc);
     piece2  := square2.piece;
     if !allow_no_piece && (piece2 == EMPTY_PIECE || piece2.color == square1.piece.color) return false;
@@ -230,7 +264,7 @@ get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) 
     return false;
   }
 
-  straight_directions : [4] Location : .[.{1,0}, .{0,1}, .{-1,0}, .{0,-1}];
+  cardinal_directions : [4] Location : .[.{1,0}, .{0,1}, .{-1,0}, .{0,-1}];
   diagonal_directions : [4] Location : .[.{1,1}, .{-1,1}, .{-1,-1}, .{1,-1}];
   all_directions : [8] Location : .[.{1,1}, .{-1,1}, .{-1,-1}, .{1,-1},
                                          .{1,0}, .{0,1},  .{-1,0},  .{0,-1}];
@@ -241,7 +275,7 @@ get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) 
       done := false;
       loc := square.loc + direction;
       while check_move_and_add(board, square, loc, moves, true) {
-        if get(board, loc) != EMPTY_PIECE break;
+        if get(board, loc) != EMPTY_PIECE break; // Can't skip over pieces
         loc += direction;
       }
     }
@@ -259,7 +293,7 @@ get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) 
         loc.y += 2*color_direction; check_move_and_add(board, square, loc, moves, false);
       }
     case .ROOK;
-      check_moves_in_direction(board, square, straight_directions, moves);
+      check_moves_in_direction(board, square, cardinal_directions, moves);
     case .BISHOP;
       check_moves_in_direction(board, square, diagonal_directions, moves);
     case .KNIGHT;
@@ -287,7 +321,7 @@ is_legal :: (using board : *Board, using move : *Move) -> bool {
   // simulate move, check if king is in check, and then reverse move and return
   make_move(board, move);
   legal := !is_in_check(board, square1.piece.color);
-  reverse_move(board, move);
+  reverse_move(board);
   return legal;
 }
 
@@ -297,7 +331,7 @@ is_pseudo_legal :: (using board : *Board, using move : *Move) -> bool {
   // print("% -> %\n  % to move\n", square1, square2, board.turn);
 
   if p1 == EMPTY_PIECE return false; // there needs to be a piece moving
-  if p1.color != turn  return false; // needs to be the piece's color's turn
+  // if p1.color != turn  return false; // needs to be the piece's color's turn
   if p1.color == p2.color return false; // Color can't take its own color
 
   loc1 := square1.loc;

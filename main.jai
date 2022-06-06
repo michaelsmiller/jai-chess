@@ -121,9 +121,10 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
         m : Move;
         m.square1 = prev;
         m.square2 = curr;
-        // if is_pseudo_legal(*board, *m) {
         if is_legal(*board, *m) {
           make_move(*board, *m);
+          print("% to move\n", board.turn);
+          if is_checkmate(*board) print("CHECKMATE: % wins!\n", other_color(board.turn));
           to_redraw_pieces = true;
         }
         else print("Illegal move!\n");
@@ -210,6 +211,17 @@ key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, 
       glfwSetCharCallback(window, char_callback);
       glfwSetKeyCallback(window, null);
       algebra_buffer_loc = -1;
+    }
+    else if action == GLFW_PRESS && key == GLFW_KEY_U {
+      can_undo := board.move_history.count > 0;
+      if !can_undo {
+        print("Cannot undo because there have been no moves!\n");
+        return;
+      }
+      move := peek(board.move_history);
+      print("Undoing last move: %\n", move);
+      reverse_move(*board);
+      to_redraw_pieces = true;
     }
     else { // print the key pressed
       builder : String_Builder;
