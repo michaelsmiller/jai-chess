@@ -174,7 +174,7 @@ set_position_from_file :: (board : *Board, filename : string) {
 get_pseudo_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) -> bool {
   location  := square.loc;
   piece     := square.piece;
-  direction := cast(s32)(ifx piece.color == .WHITE then 1 else -1);
+  color_direction := cast(s32)(ifx piece.color == .WHITE then 1 else -1);
 
   in_bounds :: (loc : Location) -> bool {
     return loc.x >= 0 && loc.x < Board.W && loc.y >= 0 && loc.y < Board.H;
@@ -196,30 +196,54 @@ get_pseudo_legal_moves :: (using board : *Board, square : *Square, moves : *[..]
     return false;
   }
 
+  straight_directions : [4] Location : .[.{1,0}, .{0,1}, .{-1,0}, .{0,-1}];
+  diagonal_directions : [4] Location : .[.{1,1}, .{-1,1}, .{-1,-1}, .{1,-1}];
+  all_directions : [8] Location : .[.{1,1}, .{-1,1}, .{-1,-1}, .{1,-1},
+                                         .{1,0}, .{0,1},  .{-1,0},  .{0,-1}];
+  check_moves_in_direction :: (board : *Board, square : *Square,
+                               directions : [] Location, moves : *[..] Move) {
+    for direction : directions {
+      // go in this direction until blocked
+      done := false;
+      loc := square.loc + direction;
+      while check_move_and_add(board, square, loc, moves, true) {
+        if get(board, loc) != EMPTY_PIECE break;
+        loc += direction;
+      }
+    }
+  }
   initial_count := moves.count;
   if piece.type == {
     case .PAWN;
       loc   := location;
-      loc.y += direction; check_move_and_add(board, square, loc, moves, false);
+      loc.y += color_direction; check_move_and_add(board, square, loc, moves, false);
       loc.x = location.x + 1; check_move_and_add(board, square, loc, moves, true, false);
       loc.x = location.x - 1; check_move_and_add(board, square, loc, moves, true, false);
       loc = location;
       if    (piece.color == .WHITE && location.y == 1)
          || (piece.color == .BLACK && location.y == Board.H-2) {
-        loc.y += 2*direction; check_move_and_add(board, square, loc, moves, false);
+        loc.y += 2*color_direction; check_move_and_add(board, square, loc, moves, false);
       }
     case .ROOK;
+      check_moves_in_direction(board, square, straight_directions, moves);
     case .BISHOP;
+      check_moves_in_direction(board, square, diagonal_directions, moves);
     case .KNIGHT;
+      knight_offsets : [8] Location : .[
+        .{1, 2}, .{2, 1}, .{2, -1}, .{1, -2},
+        .{-1, 2}, .{-2, 1}, .{-2, -1}, .{-1, -2},
+      ];
+      for offset : knight_offsets
+        check_move_and_add(board, square, location+offset, moves, true);
     case .QUEEN;
+      check_moves_in_direction(board, square, all_directions, moves);
     case .KING;
+      for direction : all_directions
+        check_move_and_add(board, square, location+direction, moves, true);
+    case; assert(false);
   }
-  count := moves.count - initial_count;
-  if count > 0 {
-    print("Found and added % moves.\n", count);
-  }
-  else print("Found 0 legal moves.\n");
 
+  count := moves.count - initial_count;
   return count > 0;
 }
 

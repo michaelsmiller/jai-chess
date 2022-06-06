@@ -78,6 +78,11 @@ operator + :: (a : Vector2($T), b : Vector2(T)) -> Vector2(T) {
   return v;
 }
 
+operator += :: (a : *Vector2($T), b : Vector2(T)) {
+  a.x += b.x;
+  a.y += b.y;
+}
+
 operator == :: (a : Vector2($T), b : Vector2(T)) -> bool {
   return a.x == b.x && a.y == b.y;
 }
