@@ -121,8 +121,9 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
         m : Move;
         m.square1 = prev;
         m.square2 = curr;
-        if is_pseudo_legal(*board, *m) {
-          move(*board, *m);
+        // if is_pseudo_legal(*board, *m) {
+        if is_legal(*board, *m) {
+          make_move(*board, *m);
           to_redraw_pieces = true;
         }
         else print("Illegal move!\n");
@@ -131,15 +132,15 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
       else {
         square_selections[i] = 1;
         // if this square has a piece display all the possible moves
-        pseudo_moves : [..] Move;
+        moves : [..] Move;
         square1 := board.squares[i];
-        get_pseudo_legal_moves(*board, *square1, *pseudo_moves);
-        for *move : pseudo_moves {
+        get_legal_moves(*board, *square1, *moves);
+        for *move : moves {
           loc := move.square2.loc;
           j := loc.x + board.W * loc.y;
           square_selections[j] = 2; // secondary
         }
-        array_reset(*pseudo_moves);
+        array_reset(*moves);
       }
     }
     else {// square_selections[i] = 0;

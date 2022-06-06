@@ -134,12 +134,21 @@ other_color :: (color : PieceColor) -> PieceColor {
   return .NONE;
 }
 
-move :: (using board : *Board, using move : *Move, check : bool = false) -> bool {
+make_move :: (using board : *Board, using move : *Move, check : bool = false) -> bool {
   i1 := square1.loc.x + square1.loc.y * board.W;
   i2 := square2.loc.x + square2.loc.y * board.W;
   squares[i1].piece = EMPTY_PIECE;
   squares[i2].piece = square1.piece;
   board.turn = other_color(turn); // change colors
+  return true;
+}
+
+reverse_move :: (using board : *Board, using move : *Move, check : bool = false) -> bool {
+  i1 := square1.loc.x + square1.loc.y * board.W;
+  i2 := square2.loc.x + square2.loc.y * board.W;
+  squares[i1].piece = square1.piece;
+  squares[i2].piece = square2.piece;
+  board.turn = other_color(turn); // change colors back
   return true;
 }
 
@@ -171,7 +180,30 @@ set_position_from_file :: (board : *Board, filename : string) {
 
 // Chess rules
 
-get_pseudo_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) -> bool {
+is_in_check :: (using board : *Board, color : PieceColor) -> bool {
+  other := other_color(color);
+  // find king with color
+  move : Move;
+  for *square : squares {
+    piece := square.piece;
+    if piece.type == .KING && piece.color == color {
+      move.square2 = <<square;
+      break;
+    }
+  }
+
+  for *square : squares {
+    if square.loc == move.square2.loc continue;
+    piece := square.piece;
+    if piece.color != other continue; // takes care of empty square case
+
+    move.square1 = <<square;
+    if is_pseudo_legal(board, *move) return true;
+  }
+  return false;
+}
+
+get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) -> bool {
   location  := square.loc;
   piece     := square.piece;
   color_direction := cast(s32)(ifx piece.color == .WHITE then 1 else -1);
@@ -190,8 +222,10 @@ get_pseudo_legal_moves :: (using board : *Board, square : *Square, moves : *[..]
       move : Move;
       move.square1 = <<square1;
       move.square2 =   square2;
-      array_add(moves, move);
-      return true;
+      if is_legal(board, *move) {
+        array_add(moves, move);
+        return true;
+      }
     }
     return false;
   }
@@ -245,6 +279,16 @@ get_pseudo_legal_moves :: (using board : *Board, square : *Square, moves : *[..]
 
   count := moves.count - initial_count;
   return count > 0;
+}
+
+is_legal :: (using board : *Board, using move : *Move) -> bool {
+  if !is_pseudo_legal(board, move) return false;
+
+  // simulate move, check if king is in check, and then reverse move and return
+  make_move(board, move);
+  legal := !is_in_check(board, square1.piece.color);
+  reverse_move(board, move);
+  return legal;
 }
 
 is_pseudo_legal :: (using board : *Board, using move : *Move) -> bool {
