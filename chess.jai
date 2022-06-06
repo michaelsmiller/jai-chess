@@ -243,6 +243,8 @@ is_checkmate :: (board : *Board) -> bool {
   return checkmate;
 }
 
+// @note: will return false for rooks involved in castling but that should be okay because
+//        we don't need an accurate result in that scenario, probably
 has_moved :: (using board : *Board, using square : *Square) -> bool {
   assert(piece == get(board, loc));
   // Checks if the piece currently on the square has ever moved to the square.
@@ -380,6 +382,9 @@ is_legal :: (using board : *Board, using move : *Move) -> bool {
   make_move(board, move);
   legal := !is_in_check(board, square1.piece.color);
   reverse_move(board);
+
+  // @todo: If move is a castle, then add a check that in-between squares are not under attack
+
   return legal;
 }
 
@@ -426,7 +431,27 @@ is_pseudo_legal :: (using board : *Board, using move : *Move) -> bool {
   if piece_between(board, loc1, loc2) return false; // check for piece in the way
 
   if p1.type == {
-    case .KING; return dx <= 1 && dy <= 1;
+    case .KING;
+      if dx <= 1 && dy <= 1 return true; // normal king moves
+
+      // castling
+      // 0. check if dy == 0 and dx == 2
+      if dy > 0 || dx != 2 return false;
+      // 1. check if king has moved
+      if has_moved(board, *square1) return false;
+      // 2. check if there is a rook in the direction we are going
+      rook_loc := loc2;
+      rook_loc.x = ifx direction.x == 1 then Board.W-1 else 0;
+      rook_square := get_square(board, rook_loc);
+      rook := rook_square.piece;
+      if rook.color != p1.color || rook.type != .ROOK return false;
+      // 3. check if rook has moved
+      if has_moved(board, *rook_square) return false;
+
+      // 4. MAYYYYYBE check if in between squares are under attack?
+      // @todo: do this, get_legal_moves(), make_move(), and reverse_move()
+      return true;
+
     case .PAWN;
       if direction.y != color_multiplier return false; // pawn can only move up for white and down for black
       // diagonal pawn move must be taking a piece
