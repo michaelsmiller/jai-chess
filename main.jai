@@ -10,7 +10,6 @@ STB :: #import "stb_image"; // for reading pngs into memory
 #load "util.jai"; // just timer code so far
 #load "chess.jai"; // board/piece state and game logic
 
-MSAA :: false;
 time_sample_rate : s64 : 100; // for framerate sampling
 window_size :: Vector2(s32).{800, 800};
 
@@ -21,10 +20,10 @@ to_redraw_pieces := false;      // Whether we need to recreate piece vertices an
 nframes          : s64 = 0;     // number of frames that have passed up to this point
 framerate        : float = 0.;  // Written to and displayed on command
 
-board            : Board;       // The internal game state
+board            : Board;       // The internal game state, including move stack
 NUM_SQUARES :: board.W * board.H; // should be 64
 
-square_selections : [NUM_SQUARES] s32; // The state of which squares are selected
+square_selections : [NUM_SQUARES] s32; // The state of which squares have what selection
 selection_changed := false;
 
 InputState :: enum {
@@ -34,7 +33,6 @@ InputState :: enum {
 input_state : InputState = .DEFAULT; // The mode of inputting character by character
 algebra_buffer_loc : s32;            // The current position in a piece location buffer being written to
 algebra_buffer : [3] u8;             // Piece location buffer, algebraic notation (e.g. pe4)
-// @todo: add global for registering current move and move history
 
 // End global state
 
@@ -631,11 +629,6 @@ main :: () {
   }
 
   texture : GLuint; // spritesheet of pieces
-  #if MSAA {
-    texture2: GLuint;
-    fbo     : GLuint;
-    rdo     : GLuint;
-  }
   {
     width, height, nchannels : s32;
 
@@ -669,25 +662,7 @@ main :: () {
     if glGetError() != GL_NO_ERROR error("There was an OpenGL texture error!\n");
     // glGenerateMipmap(GL_TEXTURE_2D); // doubles loading time, should be removed if mipmaps not needed
 
-
-    // multisample code
-    #if MSAA {
-      // framebuffer
-      glGenFramebuffers(1, *fbo);
-      glEnable(GL_MULTISAMPLE);
-      glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-      // texture
-      glGenTextures(1, *texture2);
-      glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, texture2);
-      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, 4, GL_RGBA, xx width, xx height, xx true);
-      check_gl_error();
-
-      glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, texture2, 0);
-      check_framebuffer_status(); // errors if fbo is incomplete
-    }
-
     print("Created a (%, %) texture\n", width, height);
-    #if MSAA glBindFramebuffer(GL_FRAMEBUFFER, 0); // Goes back to the backbuffer
   }
 
 
