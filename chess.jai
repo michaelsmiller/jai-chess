@@ -143,8 +143,17 @@ make_move :: (using board : *Board, using move : *Move) -> bool {
   i2 := square2.loc.x + square2.loc.y * board.W;
   squares[i1].piece = EMPTY_PIECE;
   squares[i2].piece = square1.piece;
-  board.turn = other_color(turn); // change colors
 
+  // EN PASSANT
+  diff := square2.loc - square1.loc;
+  if square1.piece.type == .PAWN && square2.piece == EMPTY_PIECE && Math.abs(diff.x) == 1 {
+    loc := square1.loc;
+    loc.x = square2.loc.x;
+    i := loc.x + loc.y * board.W;
+    squares[i].piece = EMPTY_PIECE;
+  }
+
+  board.turn = other_color(turn); // change colors
   array_add(*move_history, <<move);
   return true;
 }
@@ -156,6 +165,17 @@ reverse_move :: (using board : *Board) -> bool {
   i2 := square2.loc.x + square2.loc.y * board.W;
   squares[i1].piece = square1.piece;
   squares[i2].piece = square2.piece;
+
+  // EN PASSANT
+  diff := square2.loc - square1.loc;
+  if square1.piece.type == .PAWN && square2.piece == EMPTY_PIECE && Math.abs(diff.x) == 1 {
+    loc := square1.loc;
+    loc.x = square2.loc.x;
+    i := loc.x + loc.y * board.W;
+    squares[i].piece.type = .PAWN;
+    squares[i].piece.color = other_color(square1.piece.color);
+  }
+
   board.turn = other_color(turn); // change colors back
   return true;
 }
@@ -221,6 +241,27 @@ is_checkmate :: (board : *Board) -> bool {
 
   checkmate := !get_legal_moves(board, *moves);
   return checkmate;
+}
+
+has_moved :: (using board : *Board, using square : *Square) -> bool {
+  assert(piece == get(board, loc));
+  // Checks if the piece currently on the square has ever moved to the square.
+  for *move : move_history {
+    p := move.square1.piece;
+    to_loc := move.square2.loc;
+    if p == piece && loc == to_loc return true;
+  }
+  return false;
+}
+
+has_just_moved :: (using board : *Board, using square : *Square) -> bool {
+  assert(piece == get(board, loc));
+  if board.move_history.count == 0 return false;
+  // Checks if the piece currently on the square has ever moved to the square.
+  move := peek(board.move_history);
+  p := move.square1.piece;
+  to_loc := move.square2.loc;
+  return p == piece && loc == to_loc;
 }
 
 get_legal_moves :: (board : *Board, moves : *[..] Move) -> bool {
@@ -290,7 +331,24 @@ get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) 
       loc = location;
       if    (piece.color == .WHITE && location.y == 1)
          || (piece.color == .BLACK && location.y == Board.H-2) {
-        loc.y += 2*color_direction; check_move_and_add(board, square, loc, moves, false);
+        loc.y += 2*color_direction;
+        check_move_and_add(board, square, loc, moves, false);
+      }
+
+      // en passant
+      deltas : [2] s32 : .[1, -1];
+      for dx : deltas {
+        loc = location;
+        loc.x += dx;
+        loc.y += color_direction;
+        if !in_bounds(loc) || get(board, loc) != EMPTY_PIECE continue;
+
+        loc.y = location.y;
+        pawn_square := get_square(board, loc);
+        if has_just_moved(board, *pawn_square) && pawn_square.piece.color == other_color(piece.color) {
+          loc.y += color_direction;
+          good := check_move_and_add(board, square, loc, moves, false);
+        }
       }
     case .ROOK;
       check_moves_in_direction(board, square, cardinal_directions, moves);
@@ -374,7 +432,14 @@ is_pseudo_legal :: (using board : *Board, using move : *Move) -> bool {
       // diagonal pawn move must be taking a piece
       if dx == 1 {
         if dy != 1 return false;
-        return p2 != EMPTY_PIECE;
+        if p2 != EMPTY_PIECE return true;
+
+        // en passant
+        loc := loc1;
+        loc.x = loc2.x;
+        square := get_square(board, loc);
+        if square.piece.color != other_color(p1.color) || square.piece.type != .PAWN return false;
+        return has_just_moved(board, *square);
       }
       else if dx != 0 return false;
       // dx == 0
