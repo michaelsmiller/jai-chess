@@ -114,7 +114,7 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
         if curr > 0  square_selections[j] = 0;
       }
       // This represents a movement
-      if prev.piece != EMPTY_PIECE {
+      if prev.piece != EMPTY_PIECE && prev.piece.color == board.turn {
         curr := board.squares[i];
         m : Move;
         m.square1 = prev;
@@ -131,15 +131,17 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
       else {
         square_selections[i] = 1;
         // if this square has a piece display all the possible moves
-        moves : [..] Move;
+        // but only if it is that piece's turn
         square1 := board.squares[i];
-        get_legal_moves(*board, *square1, *moves);
-        for *move : moves {
-          loc := move.square2.loc;
-          j := loc.x + board.W * loc.y;
-          square_selections[j] = 2; // secondary
+        if square1.piece.color == board.turn {
+          moves : [..] Move;
+          get_legal_moves(*board, *square1, *moves);
+          for *move : moves {
+            loc := move.square2.loc;
+            j := loc.x + board.W * loc.y;
+            square_selections[j] = 2; // secondary
+          }
         }
-        array_reset(*moves);
       }
     }
     else {// square_selections[i] = 0;
@@ -220,6 +222,10 @@ key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, 
       print("Undoing last move: %\n", move);
       reverse_move(*board);
       to_redraw_pieces = true;
+      // reset selections because it looks bad right now!
+      for i : 0..NUM_SQUARES-1 square_selections[i] = 0;
+      selection_changed = true;
+
     }
     else { // print the key pressed
       builder : String_Builder;
@@ -441,6 +447,7 @@ main :: () {
 
   // set_position_from_file(*board, "positions/test.chess");
   set_position_from_file(*board, "positions/starting.chess");
+  // set_position_from_file(*board, "positions/castle.chess");
 
   // Create PieceVertex array from the other array
   piece_vertices : [..] PieceVertex;

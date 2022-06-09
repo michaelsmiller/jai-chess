@@ -121,10 +121,19 @@ place :: (using board : *Board, piece : Piece, loc : Location, check_exists : bo
   return true; // success
 }
 
+MovementFlag :: enum u8 {
+  PROMOTE_QUEEN  :: 0b00000001;
+  PROMOTE_KNIGHT :: 0b00000010;
+  PROMOTE_ROOK   :: 0b00000100;
+  PROMOTE_BISHOP :: 0b00001000;
+}
+
 // @note: needs to be reversible, so this information is necessary
 Move :: struct {
   square1 : Square;
   square2 : Square;
+
+  promotion_type := PieceType.EMPTY; // for promoting pawns only
 }
 operator == :: (m1 : Move, m2 : Move) -> bool {
   return m1.square1 == m2.square1 && m1.square2 == m2.square2;
@@ -134,15 +143,20 @@ other_color :: (color : PieceColor) -> PieceColor {
   if color == {
     case .WHITE; return .BLACK;
     case .BLACK; return .WHITE;
+    case       ; return .NONE;
   }
-  return .NONE;
 }
 
 make_move :: (using board : *Board, using move : *Move) -> bool {
   i1 := square1.loc.x + square1.loc.y * board.W;
   i2 := square2.loc.x + square2.loc.y * board.W;
+  // before any logic, change piece type if it is a pawn promoting
+  if move.promotion_type != .EMPTY
+    squares[i1].piece.type = move.promotion_type;
+
   squares[i1].piece = EMPTY_PIECE;
   squares[i2].piece = square1.piece;
+
 
   // EN PASSANT
   diff := square2.loc - square1.loc;
@@ -153,6 +167,20 @@ make_move :: (using board : *Board, using move : *Move) -> bool {
     squares[i].piece = EMPTY_PIECE;
   }
 
+  // CASTLING
+  else if square1.piece.type == .KING && Math.abs(diff.x) == 2 {
+    rook_loc := square1.loc;
+    rook_loc.x = ifx diff.x > 0 then Board.W-1 else 0;
+    rook := get(board, rook_loc);
+    assert(rook.type == .ROOK); // sanity
+    i := rook_loc.x + rook_loc.y * board.W;
+    squares[i].piece = EMPTY_PIECE;
+
+    // put the rook in the new place
+    j := ifx diff.x > 0 then i1+1 else i1-1;
+    squares[j].piece = rook;
+  }
+
   board.turn = other_color(turn); // change colors
   array_add(*move_history, <<move);
   return true;
@@ -161,8 +189,13 @@ make_move :: (using board : *Board, using move : *Move) -> bool {
 reverse_move :: (using board : *Board) -> bool {
   move := pop(*move_history);
   using move;
+
   i1 := square1.loc.x + square1.loc.y * board.W;
   i2 := square2.loc.x + square2.loc.y * board.W;
+  // before any logic, change piece type back to pawn if it was promoting
+  if move.promotion_type != .EMPTY
+    squares[i2].piece.type = .PAWN;
+
   squares[i1].piece = square1.piece;
   squares[i2].piece = square2.piece;
 
@@ -174,6 +207,21 @@ reverse_move :: (using board : *Board) -> bool {
     i := loc.x + loc.y * board.W;
     squares[i].piece.type = .PAWN;
     squares[i].piece.color = other_color(square1.piece.color);
+  }
+
+  // CASTLING
+  else if square1.piece.type == .KING && Math.abs(diff.x) == 2 {
+    // assume checks already were done on correctness
+    // get rook
+    rook_loc := square1.loc;
+    rook_loc.x = ifx diff.x > 0 then Board.W-1 else 0;
+    i := rook_loc.x + rook_loc.y * board.W;
+
+    j := ifx diff.x > 0 then i1+1 else i1-1;
+    rook := squares[j].piece;
+    assert(rook.type == .ROOK); // sanity
+    squares[j].piece = EMPTY_PIECE;
+    squares[i].piece = rook;
   }
 
   board.turn = other_color(turn); // change colors back
@@ -208,25 +256,27 @@ set_position_from_file :: (board : *Board, filename : string) {
 
 // Chess rules
 
-is_in_check :: (using board : *Board, color : PieceColor) -> bool {
+is_under_attack :: (using board : *Board, square : *Square, color : PieceColor) -> bool {
   other := other_color(color);
-  // find king with color
   move : Move;
-  for *square : squares {
-    piece := square.piece;
-    if piece.type == .KING && piece.color == color {
-      move.square2 = <<square;
-      break;
-    }
-  }
+  move.square2 = <<square;
 
-  for *square : squares {
-    if square.loc == move.square2.loc continue;
-    piece := square.piece;
+  for *sq : squares {
+    if sq.loc == square.loc continue;
+    piece := sq.piece;
     if piece.color != other continue; // takes care of empty square case
 
-    move.square1 = <<square;
+    move.square1 = <<sq;
     if is_pseudo_legal(board, *move) return true;
+  }
+  return false;
+}
+
+is_in_check :: (using board : *Board, color : PieceColor) -> bool {
+  for *square : squares {
+    piece := square.piece;
+    if piece.type == .KING && piece.color == color
+      return is_under_attack(board, square, color);
   }
   return false;
 }
@@ -289,8 +339,8 @@ get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) 
     return loc.x >= 0 && loc.x < Board.W && loc.y >= 0 && loc.y < Board.H;
   }
 
-  check_move_and_add :: (board : *Board, square1 : *Square, loc : Location,
-                         moves : *[..] Move, allow_piece : bool, allow_no_piece : bool = true) -> bool {
+  check_move_and_add :: (board : *Board, square1 : *Square, loc : Location, moves : *[..] Move,
+                         allow_piece : bool, allow_no_piece := true, add_move := true) -> bool {
     if !in_bounds(loc) return false;
     square2 := get_square(board, loc);
     piece2  := square2.piece;
@@ -300,7 +350,7 @@ get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) 
       move.square1 = <<square1;
       move.square2 =   square2;
       if is_legal(board, *move) {
-        array_add(moves, move);
+        if add_move array_add(moves, move);
         return true;
       }
     }
@@ -368,6 +418,26 @@ get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) 
     case .KING;
       for direction : all_directions
         check_move_and_add(board, square, location+direction, moves, true);
+
+      // castling
+      if !has_moved(board, square) {
+        for direction : cardinal_directions if direction.y == 0 {
+          // 2. check if rook has moved
+          rook_loc := location;
+          rook_loc.x = ifx direction.x > 0 then Board.W-1 else 0;
+          rook_square := get_square(board, rook_loc);
+          if rook_square.type != .ROOK || has_moved(board, *rook_square) continue;
+
+          loc := location+direction;
+          valid := true;
+          while loc != rook_loc {
+            defer loc += direction;
+            sq := get_square(board, loc);
+            if is_under_attack(board, *sq, piece.color) valid = false;
+          }
+          if valid check_move_and_add(board, square, location+(2*direction), moves, false);
+        }
+      }
     case; assert(false);
   }
 

@@ -94,6 +94,13 @@ operator / :: (v : Vector2($T), s : T) -> Vector2(T) {
   return w;
 }
 
+operator * :: (s : T, v : Vector2($T)) -> Vector2(T) {
+  w : Vector2(T) = ---;
+  w.x = v.x * s;
+  w.y = v.y * s;
+  return w;
+}
+
 // scalar multiplication and division:
 
 operator * :: (v : Vector3($T), a : $S) -> Vector3(T) #symmetric #modify {
