@@ -29,6 +29,7 @@ selection_changed := false;
 InputState :: enum {
   DEFAULT;
   PLACE;
+  PROMOTE;
 };
 input_state : InputState = .DEFAULT; // The mode of inputting character by character
 algebra_buffer_loc : s32;            // The current position in a piece location buffer being written to
@@ -115,6 +116,9 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
       }
       // This represents a movement
       if prev.piece != EMPTY_PIECE && prev.piece.color == board.turn {
+        // @todo: maybe create a global queued move, and after handling inputs we perform the move
+        //        in the game loop itself.
+        //        unless it's a promotion, in which case we change global state and wait until input
         curr := board.squares[i];
         m : Move;
         m.square1 = prev;
@@ -184,6 +188,15 @@ char_callback :: (window : *GLFWwindow, char : u32) #c_call {
       }
       return;
     }
+    else if input_state == .PROMOTE {
+      print("In promotion land!");
+      c := to_lower(char2);
+      print("Char entered: %\n", c);
+
+      input_state = .DEFAULT;
+      glfwSetCharCallback(window, null);
+      glfwSetKeyCallback (window, key_callback);
+    }
     else error("How did we get here?\n");
   }
 }
@@ -199,8 +212,14 @@ key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, 
     }
 
     if action == GLFW_PRESS && key == GLFW_KEY_ENTER {
-        toggle = !toggle;
-        print("Toggle is now %\n", toggle);
+      toggle = !toggle;
+      print("Toggle is now %\n", toggle);
+    }
+    else if action == GLFW_PRESS && key == GLFW_KEY_SPACE {
+      color := board.turn;
+      other := other_color(color);
+      print("Artifically changing for debugging: (% -> %)\n", color, other);
+      board.turn = other;
     }
     else if action == GLFW_PRESS && key == GLFW_KEY_F {
       if nframes > time_sample_rate print("Respects paid: % fps\n", cast(int)framerate);
@@ -446,8 +465,8 @@ main :: () {
   using PieceType;
 
   // set_position_from_file(*board, "positions/test.chess");
-  set_position_from_file(*board, "positions/starting.chess");
-  // set_position_from_file(*board, "positions/castle.chess");
+  // set_position_from_file(*board, "positions/starting.chess");
+  set_position_from_file(*board, "positions/castle.chess");
 
   // Create PieceVertex array from the other array
   piece_vertices : [..] PieceVertex;

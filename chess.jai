@@ -147,6 +147,16 @@ other_color :: (color : PieceColor) -> PieceColor {
   }
 }
 
+just_promoted :: (using board : *Board) -> bool {
+  if move_history.count == 0 return false;
+  last_move := peek(board.move_history);
+  using last_move;
+  color := square1.piece.color;
+  y     := square2.loc.y;
+
+  return (color == .WHITE && y == Board.H-1) || (color == .BLACK && y == 0);
+}
+
 make_move :: (using board : *Board, using move : *Move) -> bool {
   i1 := square1.loc.x + square1.loc.y * board.W;
   i2 := square2.loc.x + square2.loc.y * board.W;
@@ -254,7 +264,37 @@ set_position_from_file :: (board : *Board, filename : string) {
   }
 }
 
-// Chess rules
+
+// CHESS RULES
+
+MoveFlag :: enum u16 #specified {
+  CAPTURE    :: 1;
+  EN_PASSANT :: 2;
+  CASTLE     :: 4;
+  PROMOTION  :: 8;
+}
+
+// @todo: test if this works for multiple flags coming together
+get_move_flags :: (using move : *Move) -> MoveFlag {
+  flags : MoveFlag;
+  // capture: if another piece is on that square then it's captured
+  if square2.piece != EMPTY_PIECE flags |= MoveFlag.CAPTURE;
+
+  // castling is when king moves 2 squares in any direction really
+  dr := square2.loc - square1.loc;
+  p  := square1.piece;
+  if Math.abs(dr.x) == 2 && p.type == .KING flags |= MoveFlag.CASTLE;
+
+  // promotion is when pawn is moving to either first square or last square
+  loc2 := square2.loc;
+  if p.type == .PAWN && (loc2.y == 0 || loc2.y == Board.H-1) flags |= MoveFlag.PROMOTION;
+
+  // en passant is when a pawn moves diagonally to a square without capturing
+  if p.type == .PAWN && (Math.abs(dr.x) == 1) && square2.piece == EMPTY_PIECE
+    flags |= MoveFlag.EN_PASSANT;
+
+  return flags;
+}
 
 is_under_attack :: (using board : *Board, square : *Square, color : PieceColor) -> bool {
   other := other_color(color);
@@ -264,10 +304,13 @@ is_under_attack :: (using board : *Board, square : *Square, color : PieceColor) 
   for *sq : squares {
     if sq.loc == square.loc continue;
     piece := sq.piece;
-    if piece.color != other continue; // takes care of empty square case
+    if piece.color != other continue; // empty squares and same color moves
 
     move.square1 = <<sq;
-    if is_pseudo_legal(board, *move) return true;
+    if is_pseudo_legal(board, *move) {
+      print("Found pseudo-legal move for %: %\n", other, move);
+      return true;
+    }
   }
   return false;
 }
@@ -275,8 +318,9 @@ is_under_attack :: (using board : *Board, square : *Square, color : PieceColor) 
 is_in_check :: (using board : *Board, color : PieceColor) -> bool {
   for *square : squares {
     piece := square.piece;
-    if piece.type == .KING && piece.color == color
+    if piece.type == .KING && piece.color == color {
       return is_under_attack(board, square, color);
+    }
   }
   return false;
 }
@@ -349,10 +393,10 @@ get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) 
       move : Move;
       move.square1 = <<square1;
       move.square2 =   square2;
-      if is_legal(board, *move) {
-        if add_move array_add(moves, move);
-        return true;
-      }
+      // if is_legal(board, *move) {
+      if add_move array_add(moves, move);
+      return true;
+      // }
     }
     return false;
   }
@@ -430,11 +474,6 @@ get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) 
 
           loc := location+direction;
           valid := true;
-          while loc != rook_loc {
-            defer loc += direction;
-            sq := get_square(board, loc);
-            if is_under_attack(board, *sq, piece.color) valid = false;
-          }
           if valid check_move_and_add(board, square, location+(2*direction), moves, false);
         }
       }
@@ -448,12 +487,23 @@ get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) 
 is_legal :: (using board : *Board, using move : *Move) -> bool {
   if !is_pseudo_legal(board, move) return false;
 
+  move_flags := get_move_flags(move);
+  if move_flags & .CASTLE {
+    direction := (square2.loc - square1.loc) / 2;
+    rook_loc := square1.loc;
+    rook_loc.x = ifx direction.x > 0 then Board.W-1 else 0;
+    loc := square1.loc + direction;
+    while loc != rook_loc {
+      defer loc += direction;
+      sq := get_square(board, loc);
+      if is_under_attack(board, *sq, square1.piece.color) return false;
+    }
+  }
+
   // simulate move, check if king is in check, and then reverse move and return
   make_move(board, move);
   legal := !is_in_check(board, square1.piece.color);
   reverse_move(board);
-
-  // @todo: If move is a castle, then add a check that in-between squares are not under attack
 
   return legal;
 }
@@ -461,11 +511,10 @@ is_legal :: (using board : *Board, using move : *Move) -> bool {
 is_pseudo_legal :: (using board : *Board, using move : *Move) -> bool {
   p1 := square1.piece;
   p2 := square2.piece;
-  // print("% -> %\n  % to move\n", square1, square2, board.turn);
 
   if p1 == EMPTY_PIECE return false; // there needs to be a piece moving
-  // if p1.color != turn  return false; // needs to be the piece's color's turn
   if p1.color == p2.color return false; // Color can't take its own color
+  if square1.loc == square2.loc return false;     // Can't move to same square
 
   loc1 := square1.loc;
   loc2 := square2.loc;
@@ -479,8 +528,8 @@ is_pseudo_legal :: (using board : *Board, using move : *Move) -> bool {
   if p1.type == .KNIGHT
     return (dx == 1 && dy == 2) || (dx == 2 && dy == 1);
 
-  if square1.loc == square2.loc return false;     // Can't move to same square
-  if dx != 0 && dy != 0 && dx != dy return false; // Either diagonals or on a main axis
+  // non-knights can only move on diagonal or cartesian axes
+  if dx != 0 && dy != 0 && dx != dy return false;
 
   // checks every space between 2 squares, exclusive, for the existence of a piece
   piece_between :: (using board : *Board, loc1 : Location, loc2 : Location) -> bool {
@@ -518,8 +567,7 @@ is_pseudo_legal :: (using board : *Board, using move : *Move) -> bool {
       // 3. check if rook has moved
       if has_moved(board, *rook_square) return false;
 
-      // 4. MAYYYYYBE check if in between squares are under attack?
-      // @todo: do this, get_legal_moves(), make_move(), and reverse_move()
+      // 4. @todo: MAYYYYYBE check if in between squares are under attack?
       return true;
 
     case .PAWN;
@@ -543,9 +591,9 @@ is_pseudo_legal :: (using board : *Board, using move : *Move) -> bool {
         return (p1.color == .WHITE && loc1.y == 1) || (p1.color == .BLACK && loc1.y == 6);
       else return true;
 
-    case .QUEEN; #through;
-    case .ROOK;  #through;
-    case .BISHOP;  return true;
+    case .QUEEN; return true;
+    case .ROOK; return dx == 0 || dy == 0;
+    case .BISHOP;  return dx == dy;
     case; assert(false); // should never reach this
   }
 
