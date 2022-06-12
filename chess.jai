@@ -121,13 +121,6 @@ place :: (using board : *Board, piece : Piece, loc : Location, check_exists : bo
   return true; // success
 }
 
-MovementFlag :: enum u8 {
-  PROMOTE_QUEEN  :: 0b00000001;
-  PROMOTE_KNIGHT :: 0b00000010;
-  PROMOTE_ROOK   :: 0b00000100;
-  PROMOTE_BISHOP :: 0b00001000;
-}
-
 // @note: needs to be reversible, so this information is necessary
 Move :: struct {
   square1 : Square;
@@ -307,10 +300,7 @@ is_under_attack :: (using board : *Board, square : *Square, color : PieceColor) 
     if piece.color != other continue; // empty squares and same color moves
 
     move.square1 = <<sq;
-    if is_pseudo_legal(board, *move) {
-      print("Found pseudo-legal move for %: %\n", other, move);
-      return true;
-    }
+    if is_pseudo_legal(board, *move) return true;
   }
   return false;
 }
@@ -360,17 +350,32 @@ has_just_moved :: (using board : *Board, using square : *Square) -> bool {
   return p == piece && loc == to_loc;
 }
 
-get_legal_moves :: (board : *Board, moves : *[..] Move) -> bool {
+get_legal_moves :: (board : *Board, moves : *[..] Move, square : *Square = null) -> bool {
+  pseudo_legal_moves : [..] Move;
+  defer array_free(pseudo_legal_moves);
+  if square == null
+    get_pseudo_legal_moves(board, *pseudo_legal_moves);
+  else
+    get_pseudo_legal_moves(board, *pseudo_legal_moves, square);
+
+  for *m : pseudo_legal_moves {
+    if is_legal(board, m) array_add(moves, <<m);
+  }
+  return moves.count > 0;
+}
+
+
+get_pseudo_legal_moves :: (board : *Board, moves : *[..] Move) -> bool {
   count0 := moves.count;
   for *square : board.squares {
     if square.piece.color == board.turn
-      get_legal_moves(board, square, moves);
+      get_pseudo_legal_moves(board, moves, square);
   }
   count := moves.count - count0;
   return count > 0;
 }
 
-get_legal_moves :: (using board : *Board, square : *Square, moves : *[..] Move) -> bool {
+get_pseudo_legal_moves :: (using board : *Board, moves : *[..] Move, square : *Square) -> bool {
   location  := square.loc;
   piece     := square.piece;
   color_direction := cast(s32)(ifx piece.color == .WHITE then 1 else -1);

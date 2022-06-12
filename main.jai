@@ -91,70 +91,81 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
   new_context : Context;
   push_context new_context {
     if !(button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE) return;
+    if input_state == .DEFAULT {
+      x, y : float64; // pixels, graphically arranged
+      glfwGetCursorPos(window, *x, *y);
+      y = window_size.y - 1 - y; // make coordinates cartesian
 
-    x, y : float64; // pixels, graphically arranged
-    glfwGetCursorPos(window, *x, *y);
-    y = window_size.y - 1 - y; // make coordinates cartesian
+      // @todo: make window_size a mutable variable that updates with the changing window
+      pixels_per_square : Vector2(s32);
+      pixels_per_square.x = window_size.x / board.W;
+      pixels_per_square.y = window_size.y / board.H;
 
-    // @todo: make window_size a mutable variable that updates with the changing window
-    pixels_per_square : Vector2(s32);
-    pixels_per_square.x = window_size.x / board.W;
-    pixels_per_square.y = window_size.y / board.H;
+      location : Location;
+      location.x = (cast(s32)x) / pixels_per_square.x;
+      location.y = (cast(s32)y) / pixels_per_square.y;
 
-    location : Location;
-    location.x = (cast(s32)x) / pixels_per_square.x;
-    location.y = (cast(s32)y) / pixels_per_square.y;
-
-    i := location.x + board.W * location.y;
-    if square_selections[i] != 1 {
-      // deselect all squares other than the new one, and mark if one was selected
-      prev : Square;
-      for j : 0..NUM_SQUARES-1 {
-        curr := square_selections[j];
-        if curr == 1 prev = board.squares[j];
-        if curr > 0  square_selections[j] = 0;
-      }
-      // This represents a movement
-      if prev.piece != EMPTY_PIECE && prev.piece.color == board.turn {
-        // @todo: maybe create a global queued move, and after handling inputs we perform the move
-        //        in the game loop itself.
-        //        unless it's a promotion, in which case we change global state and wait until input
-        curr := board.squares[i];
-        m : Move;
-        m.square1 = prev;
-        m.square2 = curr;
-        if is_legal(*board, *m) {
-          make_move(*board, *m);
-          print("% to move\n", board.turn);
-          if is_checkmate(*board) print("CHECKMATE: % wins!\n", other_color(board.turn));
-          to_redraw_pieces = true;
+      i := location.x + board.W * location.y;
+      if square_selections[i] != 1 {
+        // deselect all squares other than the new one, and mark if one was selected
+        prev : Square;
+        for j : 0..NUM_SQUARES-1 {
+          curr := square_selections[j];
+          if curr == 1 prev = board.squares[j];
+          if curr > 0  square_selections[j] = 0;
         }
-        else print("Illegal move!\n");
-      }
-      // Just selecting a square
-      else {
-        square_selections[i] = 1;
-        // if this square has a piece display all the possible moves
-        // but only if it is that piece's turn
-        square1 := board.squares[i];
-        if square1.piece.color == board.turn {
-          moves : [..] Move;
-          get_legal_moves(*board, *square1, *moves);
-          for *move : moves {
-            loc := move.square2.loc;
-            j := loc.x + board.W * loc.y;
-            square_selections[j] = 2; // secondary
+        // This represents a movement
+        if prev.piece != EMPTY_PIECE && prev.piece.color == board.turn {
+          // @todo: maybe create a global queued move, and after handling inputs we perform the move
+          //        in the game loop itself.
+          //        unless it's a promotion, in which case we change global state and wait until input
+          curr := board.squares[i];
+          m : Move;
+          m.square1 = prev;
+          m.square2 = curr;
+          if is_legal(*board, *m) {
+            make_move(*board, *m);
+            to_redraw_pieces = true;
+            move_flags := get_move_flags(*m);
+            if move_flags & .PROMOTION {
+              print("% promoted a pawn! Enter the desired piece type character code:\n", other_color(board.turn));
+              input_state = .PROMOTE;
+              glfwSetCharCallback(window, char_callback);
+              glfwSetKeyCallback(window, null);
+            }
+            else {
+              print("% to move\n", board.turn);
+              if is_checkmate(*board) print("CHECKMATE: % wins!\n", other_color(board.turn));
+            }
+
+          }
+          else print("Illegal move!\n");
+        }
+        // Just selecting a square
+        else {
+          square_selections[i] = 1;
+          // if this square has a piece display all the possible moves
+          // but only if it is that piece's turn
+          square1 := board.squares[i];
+          if square1.piece.color == board.turn {
+            moves : [..] Move;
+            get_legal_moves(*board, *moves, *square1);
+            for *move : moves {
+              loc := move.square2.loc;
+              j := loc.x + board.W * loc.y;
+              square_selections[j] = 2; // secondary
+            }
           }
         }
       }
-    }
-    else {// square_selections[i] = 0;
-      for j : 0..NUM_SQUARES-1 {
-        curr := square_selections[j];
-        if curr > 0  square_selections[j] = 0;
+      else {// square_selections[i] = 0;
+        for j : 0..NUM_SQUARES-1 {
+          curr := square_selections[j];
+          if curr > 0  square_selections[j] = 0;
+        }
       }
+      selection_changed = true; // marks for flushing the uniform this frame
     }
-    selection_changed = true; // marks for flushing the uniform this frame
   }
 }
 
@@ -189,9 +200,20 @@ char_callback :: (window : *GLFWwindow, char : u32) #c_call {
       return;
     }
     else if input_state == .PROMOTE {
-      print("In promotion land!");
       c := to_lower(char2);
-      print("Char entered: %\n", c);
+      success, piece := char_to_piece(c);
+      if !success {
+        print("Char % does not correspond with a piece\n", to_string(*c));
+        return;
+      }
+      piece_type := piece.type;
+      last_move := *board.move_history[board.move_history.count-1];
+      assert(last_move.square1.piece.type == .PAWN);
+      last_move.promotion_type = piece_type;
+      loc := last_move.square2.loc;
+      i := loc.x + loc.y * Board.W;
+      board.squares[i].piece.type = piece_type;
+      to_redraw_pieces = true;
 
       input_state = .DEFAULT;
       glfwSetCharCallback(window, null);
@@ -225,7 +247,7 @@ key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, 
       if nframes > time_sample_rate print("Respects paid: % fps\n", cast(int)framerate);
     }
     else if action == GLFW_PRESS && key == GLFW_KEY_P {
-      print("Entering P mode\n");
+      print("Entering 'PLACE' mode: enter valid algebraic notation for a piece and location\n");
       input_state = .PLACE;
       glfwSetCharCallback(window, char_callback);
       glfwSetKeyCallback(window, null);
@@ -466,7 +488,8 @@ main :: () {
 
   // set_position_from_file(*board, "positions/test.chess");
   // set_position_from_file(*board, "positions/starting.chess");
-  set_position_from_file(*board, "positions/castle.chess");
+  // set_position_from_file(*board, "positions/castle.chess");
+  set_position_from_file(*board, "positions/promotion.chess");
 
   // Create PieceVertex array from the other array
   piece_vertices : [..] PieceVertex;
