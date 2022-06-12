@@ -89,6 +89,7 @@ Board_ :: struct(W : s32, H : s32) {
   move_history : [..] Move;
 }
 Board :: Board_(8, 8);
+NUM_SQUARES :: Board.W * Board.H; // should be 64
 
 
 init_board :: (using board : *Board) {
@@ -154,16 +155,18 @@ make_move :: (using board : *Board, using move : *Move) -> bool {
   i1 := square1.loc.x + square1.loc.y * board.W;
   i2 := square2.loc.x + square2.loc.y * board.W;
   // before any logic, change piece type if it is a pawn promoting
-  if move.promotion_type != .EMPTY
-    squares[i1].piece.type = move.promotion_type;
+  piece := square1.piece;
+  if move.promotion_type != .EMPTY {
+    piece.type =  move.promotion_type;
+  }
 
   squares[i1].piece = EMPTY_PIECE;
-  squares[i2].piece = square1.piece;
+  squares[i2].piece = piece;
 
 
   // EN PASSANT
   diff := square2.loc - square1.loc;
-  if square1.piece.type == .PAWN && square2.piece == EMPTY_PIECE && Math.abs(diff.x) == 1 {
+  if piece.type == .PAWN && square2.piece == EMPTY_PIECE && Math.abs(diff.x) == 1 {
     loc := square1.loc;
     loc.x = square2.loc.x;
     i := loc.x + loc.y * board.W;
@@ -171,7 +174,7 @@ make_move :: (using board : *Board, using move : *Move) -> bool {
   }
 
   // CASTLING
-  else if square1.piece.type == .KING && Math.abs(diff.x) == 2 {
+  else if piece.type == .KING && Math.abs(diff.x) == 2 {
     rook_loc := square1.loc;
     rook_loc.x = ifx diff.x > 0 then Board.W-1 else 0;
     rook := get(board, rook_loc);
@@ -325,6 +328,111 @@ is_checkmate :: (board : *Board) -> bool {
 
   checkmate := !get_legal_moves(board, *moves);
   return checkmate;
+}
+
+is_draw :: (using board : *Board) -> bool {
+  // @todo: find bug that causes promoted pawns to depromote for some reason
+  legal_moves : [..] Move;
+  defer array_free(legal_moves);
+  has_moves := get_legal_moves(board, *legal_moves);
+  // Stalemate
+  if !is_checkmate(board) && !has_moves return true;
+
+  // insufficient material to checkmate other king
+  {
+    using PieceType;
+    piece_counts, other_piece_counts : [6] int;
+    for *square : squares {
+      if square.piece != EMPTY_PIECE {
+        if square.piece.color == turn
+          piece_counts[square.piece.type] += 1;
+        else
+          other_piece_counts[square.piece.type] += 1;
+      }
+    }
+    if piece_counts[PieceType.PAWN] + piece_counts[PieceType.QUEEN] + piece_counts[PieceType.ROOK] == 0 {
+      knights := piece_counts[PieceType.KNIGHT];
+      bishops := piece_counts[PieceType.BISHOP];
+      if knights == 0 && bishops == 0 return true;
+
+      if knights + bishops == 1 {
+        if other_piece_counts[PieceType.KNIGHT]
+          +other_piece_counts[PieceType.QUEEN ]
+          +other_piece_counts[PieceType.BISHOP]
+          +other_piece_counts[PieceType.ROOK  ]
+          +other_piece_counts[PieceType.PAWN  ]  == 0 return true;
+        // @note: purposefully neglecting to find opposing bishop and check if same
+        //        color as our bishop, which would also be a draw.
+      }
+    }
+  }
+
+  // the other rules require looking back
+  if move_history.count == 0 return false;
+
+  // 50 move rule: both players make 50 moves without capturing pieces or moving a pawn
+  fifty_move_draw := true;
+  for < *m : move_history {
+    using m;
+    if square1.piece.type == .PAWN || square2.piece != EMPTY_PIECE {
+      fifty_move_draw = false;
+      break;
+    }
+  }
+  if fifty_move_draw return true;
+
+  // threefold repetition
+  // strategy: unspool move_history and check for each position if the board was the same
+  //           as the current board, and if all the same moves were possible.
+  //           if this happened twice before the position is a draw.
+  #if true
+  {
+    // @todo: fix bug where pawn promotion is undone when this code is run
+    position_count := 1;
+    current_position : [Board.W*Board.H] Square = squares;
+    current_turn := board.turn;
+    past_moves : [..] Move;
+    defer array_free(past_moves);
+    past_legal_moves : [..] Move;
+    defer array_free(past_legal_moves);
+
+    while move_history.count > 0 {
+      m := *move_history[move_history.count-1];
+      array_add(*past_moves, <<m);
+      reverse_move(board);
+      if board.turn != current_turn continue;
+
+      // check if board the same as now
+      same_position := true;
+      for i : 0..NUM_SQUARES {
+        if board.squares[i] != current_position[i] {
+          same_position = false;
+          break;
+        }
+      }
+      if !same_position continue;
+
+      // check if all possible moves are the same then as they are now
+      array_reset(*past_legal_moves);
+      get_legal_moves(board, *past_legal_moves);
+      if past_legal_moves.count != legal_moves.count continue;
+      same_possible_moves := true;
+      for i : 0..legal_moves.count-1 {
+        if legal_moves[i] != past_legal_moves[i] {
+          same_possible_moves = false;
+          break;
+        }
+      }
+      if same_possible_moves position_count += 1;
+    }
+    for < *m : past_moves {
+      make_move(board, m);
+    }
+
+    if position_count >= 3 return true;
+  }
+
+  return false;
 }
 
 // @note: will return false for rooks involved in castling but that should be okay because

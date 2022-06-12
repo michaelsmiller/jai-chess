@@ -21,7 +21,6 @@ nframes          : s64 = 0;     // number of frames that have passed up to this 
 framerate        : float = 0.;  // Written to and displayed on command
 
 board            : Board;       // The internal game state, including move stack
-NUM_SQUARES :: board.W * board.H; // should be 64
 
 square_selections : [NUM_SQUARES] s32; // The state of which squares have what selection
 selection_changed := false;
@@ -80,10 +79,13 @@ check_gl_error :: (err_on_failure := true) -> (bool, GLenum) {
 
 // callbacks
 framebuffer_size_callback :: (window : *GLFWwindow, width : s32, height : s32) #c_call {
-  // new_context : Context;
-  // push_context new_context {
-    glViewport(0, 0, xx width, xx height);
-  // }
+  glViewport(0, 0, xx width, xx height);
+}
+
+do_end_of_turn_logic :: () {
+  if is_checkmate(*board) print("CHECKMATE: % wins!\n", other_color(board.turn));
+  if is_draw(*board) print("DRAW: everybody's a winner (empyrrhically)!");
+  print("% to move\n", board.turn);
 }
 
 mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: s32) #c_call {
@@ -134,8 +136,7 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
               glfwSetKeyCallback(window, null);
             }
             else {
-              print("% to move\n", board.turn);
-              if is_checkmate(*board) print("CHECKMATE: % wins!\n", other_color(board.turn));
+              do_end_of_turn_logic();
             }
 
           }
@@ -203,7 +204,7 @@ char_callback :: (window : *GLFWwindow, char : u32) #c_call {
       c := to_lower(char2);
       success, piece := char_to_piece(c);
       if !success {
-        print("Char % does not correspond with a piece\n", to_string(*c));
+        print("Char % does not correspond with a piece. Try again:\n", to_string(*c));
         return;
       }
       piece_type := piece.type;
@@ -213,6 +214,8 @@ char_callback :: (window : *GLFWwindow, char : u32) #c_call {
       loc := last_move.square2.loc;
       i := loc.x + loc.y * Board.W;
       board.squares[i].piece.type = piece_type;
+      print("Piece is now %\n", board.squares[i].piece.type);
+      do_end_of_turn_logic();
       to_redraw_pieces = true;
 
       input_state = .DEFAULT;
