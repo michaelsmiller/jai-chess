@@ -199,10 +199,12 @@ reverse_move :: (using board : *Board) -> bool {
   i1 := square1.loc.x + square1.loc.y * board.W;
   i2 := square2.loc.x + square2.loc.y * board.W;
   // before any logic, change piece type back to pawn if it was promoting
-  if move.promotion_type != .EMPTY
-    squares[i2].piece.type = .PAWN;
+  move_flags := get_move_flags(*move);
+  piece := squares[i2].piece;
+  if move_flags & .PROMOTION
+    piece.type = .PAWN;
 
-  squares[i1].piece = square1.piece;
+  squares[i1].piece = piece;
   squares[i2].piece = square2.piece;
 
   // EN PASSANT
