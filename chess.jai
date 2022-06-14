@@ -338,7 +338,10 @@ is_draw :: (using board : *Board) -> bool {
   defer array_free(legal_moves);
   has_moves := get_legal_moves(board, *legal_moves);
   // Stalemate
-  if !is_checkmate(board) && !has_moves return true;
+  if !is_checkmate(board) && !has_moves {
+    print("Stalemate\n");
+    return true;
+  }
 
   // insufficient material to checkmate other king
   {
@@ -362,7 +365,10 @@ is_draw :: (using board : *Board) -> bool {
           +other_piece_counts[PieceType.QUEEN ]
           +other_piece_counts[PieceType.BISHOP]
           +other_piece_counts[PieceType.ROOK  ]
-          +other_piece_counts[PieceType.PAWN  ]  == 0 return true;
+          +other_piece_counts[PieceType.PAWN  ]  == 0 {
+            print("Insufficient mating material\n");
+            return true;
+          }
         // @note: purposefully neglecting to find opposing bishop and check if same
         //        color as our bishop, which would also be a draw.
       }
@@ -373,21 +379,26 @@ is_draw :: (using board : *Board) -> bool {
   if move_history.count == 0 return false;
 
   // 50 move rule: both players make 50 moves without capturing pieces or moving a pawn
-  fifty_move_draw := true;
+  no_pawns_or_captures := true;
+  move_count := 0;
   for < *m : move_history {
+    move_count += 1;
+    if move_count >= 100 break;
     using m;
     if square1.piece.type == .PAWN || square2.piece != EMPTY_PIECE {
-      fifty_move_draw = false;
+      no_pawns_or_captures = false;
       break;
     }
   }
-  if fifty_move_draw return true;
+  if no_pawns_or_captures && move_count >= 100 {
+    print("Fifty move draw\n");
+    return true;
+  }
 
   // threefold repetition
   // strategy: unspool move_history and check for each position if the board was the same
   //           as the current board, and if all the same moves were possible.
   //           if this happened twice before the position is a draw.
-  #if true
   {
     // @todo: fix bug where pawn promotion is undone when this code is run
     position_count := 1;

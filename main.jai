@@ -490,9 +490,9 @@ main :: () {
   using PieceType;
 
   // set_position_from_file(*board, "positions/test.chess");
-  // set_position_from_file(*board, "positions/starting.chess");
+  set_position_from_file(*board, "positions/starting.chess");
   // set_position_from_file(*board, "positions/castle.chess");
-  set_position_from_file(*board, "positions/promotion.chess");
+  // set_position_from_file(*board, "positions/promotion.chess");
 
   // Create PieceVertex array from the other array
   piece_vertices : [..] PieceVertex;
