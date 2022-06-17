@@ -7,6 +7,7 @@ in ivec2 vSquareIndex;
 
 out vec3 vertColor;
 out vec2 texCoords;
+
 // 'flat' = not to try to interpolate
 flat out ivec2 squareIndex;
 

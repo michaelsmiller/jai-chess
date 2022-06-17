@@ -344,6 +344,9 @@ set_uniform :: (program : GLuint, cname : *u8, value : $T) {
   else #if T == [] s32 {
     glUniform1iv(loc, cast(GLsizei)value.count, value.data);
   }
+  else #if T == [] Vector2(s32) {
+    glUniform2iv(loc, cast(GLsizei)value.count, cast(*s32)value.data);
+  }
   else {
     error("set_uniform: type '%' not supported yet!\nShould probably add it\n", T);
   }

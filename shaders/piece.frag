@@ -1,13 +1,10 @@
-// #version 300 es
 #version 140
 
-// @note: probably unnecessary
 precision mediump int;
 precision mediump float;
 
 in vec2 texIndex;
 in vec2 texCoords;
-in vec3 debugColor; // @todo remove this
 
 uniform sampler2D textureMap;
 
@@ -27,9 +24,4 @@ void main() {
     gl_FragColor = texColor;
   else
     discard; // Does not process this fragment any further
-
-  // @todo: figure out what the value of gl_Position is in other shader maybe
-  //        Use like a debug color or something
-  // gl_FragColor = vec4(1., 0., 0., 1.); // temporary
-  // gl_FragColor.rgb = debugColor;
 }

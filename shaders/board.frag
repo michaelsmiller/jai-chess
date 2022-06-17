@@ -2,12 +2,20 @@
 #version 140
 
 #define PI 3.1415926538;
+#define BOARD_WIDTH 8
+#define BOARD_HEIGHT BOARD_WIDTH
+#define NUM_SQUARES (BOARD_WIDTH*BOARD_HEIGHT)
 
 precision mediump int;
 precision mediump float;
 
 in vec3 vertColor; // the background color of the square
 in vec2 texCoords; // texture coordinates within square
+// @note: The reason squareIndex isn't replaced by texture coordinates
+//        In board space is that this is more space and time efficient,
+//        and also it might prevent some aliasing where parts of squares
+//        are assigned to the neighboring square instead and squares have weird
+//        borders. idk
 flat in ivec2 squareIndex;
 
 // this is the last fragment shader so only output is gl_FragColor
@@ -18,8 +26,8 @@ uniform vec3  borderColor;
 uniform vec3  selectionColor1; // User selects a square
 uniform vec3  selectionColor2; // squares highlighted with a different color to demonstrate something
 
-uniform ivec2 squareDim = ivec2(8, 8);
-uniform int selected[8*8];
+uniform ivec2 squareDim = ivec2(BOARD_WIDTH, BOARD_HEIGHT);
+uniform int selected[NUM_SQUARES];
 
 uniform float t = 0.;
 uniform float period = 3; // in seconds
@@ -39,6 +47,7 @@ void main() {
   if (squareIndex.y == squareDim.y-1 && texCoords.y > (1. - 2*borderWidth)) isBorder = true;
   if (squareIndex.x == 0 && texCoords.x < 2*borderWidth)                    isBorder = true;
   if (squareIndex.y == 0 && texCoords.y < 2*borderWidth)                    isBorder = true;
+
 
   // gl_FragColor.a doesn't seem to do anything
   if (isBorder)

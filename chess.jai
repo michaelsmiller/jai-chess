@@ -400,7 +400,6 @@ is_draw :: (using board : *Board) -> bool {
   //           as the current board, and if all the same moves were possible.
   //           if this happened twice before the position is a draw.
   {
-    // @todo: fix bug where pawn promotion is undone when this code is run
     position_count := 1;
     current_position : [Board.W*Board.H] Square = squares;
     current_turn := board.turn;
