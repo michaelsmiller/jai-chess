@@ -509,7 +509,8 @@ main :: () {
   array_reserve(*piece_indices , 6*(NUM_SQUARES+4));
 
   // actually updates piece_vertices and piece_indices, maybe name should change
-  update_piece_vertices :: (piece_vertices : *[..] PieceVertex, piece_indices : *[..] u32 ) { // this will be a function for computing the vertex/index data for piece texture rectangles
+  // @note: really this is the graphics state, as opposed to game state
+  update_piece_vertices :: (piece_vertices : *[..] PieceVertex, piece_indices : *[..] u32 ) {
     array_reset(piece_vertices);
     array_reset(piece_indices);
     n := 0;

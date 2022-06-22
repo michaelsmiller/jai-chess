@@ -265,11 +265,13 @@ set_position_from_file :: (board : *Board, filename : string) {
 
 // CHESS RULES
 
-MoveFlag :: enum u16 #specified {
-  CAPTURE    :: 1;
-  EN_PASSANT :: 2;
-  CASTLE     :: 4;
-  PROMOTION  :: 8;
+// enum_flags are nice because they automatically are set to correct values
+// and they print really nicely (i.e. "CAPTURE | EN_PASSANT" or "PROMOTION | CAPTURE")
+MoveFlag :: enum_flags u16 {
+  CAPTURE   ;
+  EN_PASSANT;
+  CASTLE    ;
+  PROMOTION ;
 }
 
 // @todo: test if this works for multiple flags coming together
