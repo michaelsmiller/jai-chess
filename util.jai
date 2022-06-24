@@ -1,31 +1,32 @@
 // get_current_file_time() returns time in 100s of ns, or 0.1 microseconds
 // divide by 10_000 to get milliseconds.
 Timer :: struct {
-  start : u64;
-  end   : u64;
+  start : Apollo_Time;
+  end   : Apollo_Time;
 }
 
 start_timer :: (timer : *Timer) {
-  timer.start = get_current_file_time();
+  // timer.start = get_current_file_time();
+  timer.start = current_time_consensus();
 }
 
 stop_timer :: (timer : *Timer) {
-  timer.end = get_current_file_time();
+  // timer.end = get_current_file_time();
+  timer.end = current_time_consensus();
 }
 
 // milliseconds
-get_millis :: (timer : *Timer) -> u64 {
+get_millis :: (timer : *Timer) -> s64 {
   assert(timer.end > timer.start);
   dt := timer.end - timer.start;
-  return dt / 10_000;
+  millis, _ := to_milliseconds(dt);
+  return millis;
 }
 
-// seconds, in floating point
 get_seconds :: (timer : *Timer) -> float {
-  ms := get_millis(timer);
-  return cast(float) ms * 0.001;
+  millis := get_millis(timer);
+  return (cast(float) millis) * 0.001;
 }
-
 
 // random conversions
 
@@ -35,5 +36,4 @@ to_hex :: (x : $T) -> string {
 
 #scope_file;
 
-#import "Time";
 #import "Basic"; // string
