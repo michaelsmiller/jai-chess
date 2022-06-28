@@ -257,7 +257,7 @@ set_position_from_file :: (board : *Board, filename : string) {
     if line.count == 0 continue;
 
     success, p, loc := algebra_to_piece_loc(line);
-    if !success {print("Error in converting piece '%'\n", line); exit(1);}
+    if !success {print("Error (%): in converting piece '%'\n", #procedure_name(), line); exit(1);}
     place(board, p, loc, false);
   }
 }
@@ -268,9 +268,9 @@ set_position_from_file :: (board : *Board, filename : string) {
 // enum_flags are nice because they automatically are set to correct values
 // and they print really nicely (i.e. "CAPTURE | EN_PASSANT" or "PROMOTION | CAPTURE")
 MoveFlag :: enum_flags u16 {
-  CAPTURE   ;
-  EN_PASSANT;
-  CASTLE    ;
+  CAPTURE   ; // 0b0000000000000001
+  EN_PASSANT; // 0b0000000000000010
+  CASTLE    ; // etc...
   PROMOTION ;
 }
 

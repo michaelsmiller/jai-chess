@@ -36,8 +36,9 @@ algebra_buffer : [3] u8;             // Piece location buffer, algebraic notatio
 
 // End global state
 
-
-error :: (message : string, print_args : ..Any) {
+// needs to be a macro to print the #procedure_name of the calling function
+error :: (message : string, print_args : ..Any) #expand {
+  print("ERROR (%): ", #procedure_name());
   print(message, ..print_args);
   glfwTerminate();
   exit(1);
@@ -348,7 +349,7 @@ set_uniform :: (program : GLuint, cname : *u8, value : $T) {
     glUniform2iv(loc, cast(GLsizei)value.count, cast(*s32)value.data);
   }
   else {
-    error("set_uniform: type '%' not supported yet!\nShould probably add it\n", T);
+    error("type '%' not supported yet!\nShould probably add it\n", T);
   }
 }
 
