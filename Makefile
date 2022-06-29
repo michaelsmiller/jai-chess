@@ -1,10 +1,9 @@
 JC = jai-linux -x64
-CFLAGS = -import_dir modules
 
 default: run
 
 main: clean
-	@$(JC) $(CFLAGS) main.jai
+	@$(JC) build.jai
 	@clear
 
 run: main
