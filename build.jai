@@ -25,24 +25,20 @@ build :: () {
 
   set_build_options(options, w); // must happen before we start compiling
 
-  // Every time a build file or string is added, it starts compiling asynchronously
-  compiler_begin_intercept(w);
-  add_build_file("main.jai", w);
-  // dc stands for "during compile", this refers to the workspaces own build options
-  message_loop();
-  compiler_end_intercept(w);
+  // @note: If you need to intercept compiler messages, then uncomment this
+  // compiler_begin_intercept(w);
+  add_build_file("main.jai", w); // this is asynchronous
+  // message_loop();
+  // compiler_end_intercept(w);
 
-  set_build_options_dc(.{do_output=false}); // don't generate an executable
+  set_build_options_dc(.{do_output=false}); // don't generate an executable for build.jai
 }
 
+// @note: this is where we put any intercepts necessary
 message_loop :: () {
   while true {
     message := compiler_wait_for_message();
     if message.kind == .COMPLETE break; // must happen first in the loop to guarantee breaking
-
-    if message.kind != .PHASE continue;
-    phase_message := cast(*Message_Phase) message;
-    print("Phase: %\n", phase_message.phase);
   }
 }
 
