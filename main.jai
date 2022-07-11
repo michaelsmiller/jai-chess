@@ -27,21 +27,24 @@ selection_changed := false;
 
 InputState :: enum {
   DEFAULT;
-  PLACE;
   PROMOTE;
 };
 input_state : InputState = .DEFAULT; // The mode of inputting character by character
-algebra_buffer_loc : s32;            // The current position in a piece location buffer being written to
-algebra_buffer : [3] u8;             // Piece location buffer, algebraic notation (e.g. pe4)
 
 // End global state
 
 // needs to be a macro to print the #procedure_name of the calling function
-error :: (message : string, print_args : ..Any) #expand {
-  print("ERROR (%): ", #procedure_name());
+pprint :: (name : string, message : string, print_args : ..Any) #expand {
+  print("% (%): ", name, #procedure_name());
   print(message, ..print_args);
+}
+error :: (message : string, print_args : ..Any) #expand {
+  pprint("ERROR", message, ..print_args);
   glfwTerminate();
   exit(1);
+}
+warning :: (message : string, print_args : ..Any) #expand {
+  pprint("WARNING", message, ..print_args);
 }
 
 check_framebuffer_status :: (err_on_failure := true) -> (bool, GLenum) {
@@ -131,10 +134,9 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
             to_redraw_pieces = true;
             move_flags := get_move_flags(*m);
             if move_flags & .PROMOTION {
-              print("% promoted a pawn! Enter the desired piece type character code:\n", other_color(board.turn));
+              print("% promoting a pawn!\n", other_color(board.turn));
+              print("Please enter the desired piece character:\n");
               input_state = .PROMOTE;
-              glfwSetCharCallback(window, char_callback);
-              glfwSetKeyCallback(window, null);
             }
             else {
               do_end_of_turn_logic();
@@ -171,43 +173,23 @@ mouse_button_callback :: (window : *GLFWwindow, button: s32, action: s32, mods: 
   }
 }
 
-char_callback :: (window : *GLFWwindow, char : u32) #c_call {
+key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, mods : s32) #c_call {
   new_context : Context;
   push_context new_context {
-    char2 := cast(u8)char;
+    if action == GLFW_RELEASE || action == GLFW_REPEAT return;
 
-    if input_state == .PLACE {
-      if algebra_buffer_loc == -1 {
-        algebra_buffer_loc = 0;
-        return;
-      }
-
-      algebra_buffer[algebra_buffer_loc] = char2;
-      algebra_buffer_loc += 1;
-      if algebra_buffer_loc == 3 {
-        s : string;
-        s.count = 3;
-        s.data  = algebra_buffer.data;
-        print("String entered: %\n", s);
-        success, p, loc := algebra_to_piece_loc(s);
-
-        print("Piece: %\n", p);
-        success = place(*board, p, loc);
-        if !success print("WARNING: Failed to place piece!\n");
-        if success to_redraw_pieces = true;
-        input_state = .DEFAULT;
-        glfwSetCharCallback(window, null);
-        glfwSetKeyCallback (window, key_callback);
-      }
+    // @note: important that this be as early as possible, so that one can always quit
+    if key == GLFW_KEY_ESCAPE {
+      glfwSetWindowShouldClose(window, GLFW_TRUE);
       return;
     }
-    else if input_state == .PROMOTE {
-      c := to_lower(char2);
+    if input_state == .PROMOTE {
+      s := to_string(glfwGetKeyName(key, scancode));
+      c := s[0];
+      // uppercase if shift pressed
       success, piece := char_to_piece(c);
-      if !success {
-        print("Char % does not correspond with a piece. Try again:\n", to_string(*c));
-        return;
-      }
+      if !success return;
+
       piece_type := piece.type;
       last_move := *board.move_history[board.move_history.count-1];
       assert(last_move.square1.piece.type == .PAWN);
@@ -215,49 +197,28 @@ char_callback :: (window : *GLFWwindow, char : u32) #c_call {
       loc := last_move.square2.loc;
       i := loc.x + loc.y * Board.W;
       board.squares[i].piece.type = piece_type;
-      print("Piece is now %\n", board.squares[i].piece.type);
+
+      print("% Pawn promoted to %\n", board.turn, board.squares[i].piece.type);
       do_end_of_turn_logic();
       to_redraw_pieces = true;
-
       input_state = .DEFAULT;
-      glfwSetCharCallback(window, null);
-      glfwSetKeyCallback (window, key_callback);
-    }
-    else error("How did we get here?\n");
-  }
-}
-
-key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, mods : s32) #c_call {
-  new_context : Context;
-  push_context new_context {
-    if action == GLFW_RELEASE return;
-
-    if action == GLFW_PRESS && key == GLFW_KEY_ESCAPE {
-      glfwSetWindowShouldClose(window, GLFW_TRUE);
       return;
     }
 
-    if action == GLFW_PRESS && key == GLFW_KEY_ENTER {
+    if key == GLFW_KEY_ENTER {
       toggle = !toggle;
       print("Toggle is now %\n", toggle);
     }
-    else if action == GLFW_PRESS && key == GLFW_KEY_SPACE {
+    else if key == GLFW_KEY_SPACE {
       color := board.turn;
       other := other_color(color);
       print("Artifically changing for debugging: (% -> %)\n", color, other);
       board.turn = other;
     }
-    else if action == GLFW_PRESS && key == GLFW_KEY_F {
+    else if key == GLFW_KEY_F {
       if nframes > time_sample_rate print("Respects paid: % fps\n", cast(int)framerate);
     }
-    else if action == GLFW_PRESS && key == GLFW_KEY_P {
-      print("Entering 'PLACE' mode: enter valid algebraic notation for a piece and location\n");
-      input_state = .PLACE;
-      glfwSetCharCallback(window, char_callback);
-      glfwSetKeyCallback(window, null);
-      algebra_buffer_loc = -1;
-    }
-    else if action == GLFW_PRESS && key == GLFW_KEY_U {
+    else if key == GLFW_KEY_U {
       can_undo := board.move_history.count > 0;
       if !can_undo {
         print("Cannot undo because there have been no moves!\n");
@@ -274,12 +235,13 @@ key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, 
     }
     else { // print the key pressed
       builder : String_Builder;
-      init_string_builder(*builder, 3);
+      init_string_builder(*builder, 4);
       defer free_buffers(*builder);
       if mods & GLFW_MOD_CONTROL append(*builder, "Ctrl-");
       if mods & GLFW_MOD_ALT     append(*builder, "Alt-");
       if mods & GLFW_MOD_SHIFT   append(*builder, "Shift-");
-      append(*builder, tprint("Pressed: %\n", to_string(glfwGetKeyName(key, scancode))));
+      append(*builder, tprint("%\n", to_string(glfwGetKeyName(key, scancode))));
+      print("Pressed: ");
       print(builder_to_string(*builder, __temporary_allocator));
     }
   }
@@ -392,7 +354,8 @@ main :: () {
   print("Successfully created window of size % pixels\n", window_size);
   {
     ns := glfwGetWindowAttrib(window, GLFW_SAMPLES);
-    print("nsamples = %, wanted %\n", ns, NSAMPLES);
+    if ns != NSAMPLES
+      warning("Number of samples is % instead of %, system to blame probably", ns, NSAMPLES);
   }
 
   gl_load(*gl, glfwGetProcAddress); // Makes OpenGL functions available
@@ -494,9 +457,9 @@ main :: () {
   using PieceType;
 
   // set_position_from_file(*board, "positions/test.chess");
-  set_position_from_file(*board, "positions/starting.chess");
+  // set_position_from_file(*board, "positions/starting.chess");
   // set_position_from_file(*board, "positions/castle.chess");
-  // set_position_from_file(*board, "positions/promotion.chess");
+  set_position_from_file(*board, "positions/promotion.chess");
 
   // Create PieceVertex array from the other array
   piece_vertices : [..] PieceVertex;

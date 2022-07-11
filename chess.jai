@@ -262,7 +262,6 @@ set_position_from_file :: (board : *Board, filename : string) {
   }
 }
 
-
 // CHESS RULES
 
 // enum_flags are nice because they automatically are set to correct values
@@ -327,7 +326,6 @@ is_checkmate :: (board : *Board) -> bool {
   moves : [..] Move;
   defer array_free(moves);
   in_check := is_in_check(board, color);
-  if in_check print("% in check: %\n", color, is_in_check(board, color));
   if !in_check return false;
 
   checkmate := !get_legal_moves(board, *moves);

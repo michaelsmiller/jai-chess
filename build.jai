@@ -1,6 +1,8 @@
 #import "Basic";
 #import "Compiler";
 
+EXECUTABLE_NAME :: "main";
+
 build :: () {
   w := compiler_create_workspace(); // isolated environment
   if !w {
@@ -8,7 +10,6 @@ build :: () {
     return;
   }
 
-  EXECUTABLE_NAME :: "main";
 
   options := get_build_options(); // defaults + current command line options
   options.output_executable_name = EXECUTABLE_NAME;
@@ -25,11 +26,10 @@ build :: () {
 
   set_build_options(options, w); // must happen before we start compiling
 
-  // @note: If you need to intercept compiler messages, then uncomment this
-  // compiler_begin_intercept(w);
+  compiler_begin_intercept(w);
   add_build_file("main.jai", w); // this is asynchronous
-  // message_loop();
-  // compiler_end_intercept(w);
+  message_loop();
+  compiler_end_intercept(w);
 
   set_build_options_dc(.{do_output=false}); // don't generate an executable for build.jai
 }
@@ -38,7 +38,10 @@ build :: () {
 message_loop :: () {
   while true {
     message := compiler_wait_for_message();
-    if message.kind == .COMPLETE break; // must happen first in the loop to guarantee breaking
+    if message.kind == .COMPLETE {
+      print("\n------------\nBuilt '%'\n------------\n\n", EXECUTABLE_NAME);
+      break;
+    }
   }
 }
 
