@@ -185,12 +185,17 @@ key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, 
     }
     if input_state == .PROMOTE {
       s := to_string(glfwGetKeyName(key, scancode));
+      if s.count != 1 return;
       c := s[0];
       // uppercase if shift pressed
       success, piece := char_to_piece(c);
       if !success return;
 
       piece_type := piece.type;
+      if piece_type == .PAWN || piece_type == .KING {
+        print("Fuck you and your whole life!\n");
+        return;
+      }
       last_move := *board.move_history[board.move_history.count-1];
       assert(last_move.square1.piece.type == .PAWN);
       last_move.promotion_type = piece_type;
@@ -207,12 +212,12 @@ key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, 
 
     if key == GLFW_KEY_ENTER {
       toggle = !toggle;
-      print("Toggle is now %\n", toggle);
+      print("Toggle boolean is now %\n", toggle);
     }
     else if key == GLFW_KEY_SPACE {
       color := board.turn;
       other := other_color(color);
-      print("Artifically changing for debugging: (% -> %)\n", color, other);
+      print("FOR DEBUGGING: changing color to move: (% -> %)\n", color, other);
       board.turn = other;
     }
     else if key == GLFW_KEY_F {
@@ -457,9 +462,9 @@ main :: () {
   using PieceType;
 
   // set_position_from_file(*board, "positions/test.chess");
-  // set_position_from_file(*board, "positions/starting.chess");
+  set_position_from_file(*board, "positions/starting.chess");
   // set_position_from_file(*board, "positions/castle.chess");
-  set_position_from_file(*board, "positions/promotion.chess");
+  // set_position_from_file(*board, "positions/promotion.chess");
 
   // Create PieceVertex array from the other array
   piece_vertices : [..] PieceVertex;

@@ -40,7 +40,7 @@ char_to_piece :: (char : u8) -> bool, Piece {
   p : Piece;
   capitalized : bool = char >= 65 && char <= 90;
   lowercased  : bool = char >= 97 && char <= 122;
-  assert(is_alpha(char));
+  if !is_alpha(char) return false, EMPTY_PIECE;
   if capitalized p.color = .WHITE;
   else p.color = .BLACK;
 
@@ -416,7 +416,7 @@ is_draw :: (using board : *Board) -> bool {
 
       // check if board the same as now
       same_position := true;
-      for i : 0..NUM_SQUARES {
+      for i : 0..NUM_SQUARES-1 {
         if board.squares[i] != current_position[i] {
           same_position = false;
           break;
