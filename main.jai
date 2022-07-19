@@ -360,7 +360,7 @@ main :: () {
   {
     ns := glfwGetWindowAttrib(window, GLFW_SAMPLES);
     if ns != NSAMPLES
-      warning("Number of samples is % instead of %, system to blame probably", ns, NSAMPLES);
+      warning("Number of samples is % instead of %, system to blame probably\n", ns, NSAMPLES);
   }
 
   gl_load(*gl, glfwGetProcAddress); // Makes OpenGL functions available

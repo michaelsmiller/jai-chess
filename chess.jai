@@ -14,6 +14,7 @@ PieceType :: enum s32 {
   PAWN   :: 5;
   EMPTY  :: 6; // not important what the number is
 }
+NUM_PIECE_TYPES :: #run enum_highest_value(PieceType) + 1;
 
 Piece :: struct {
   color     : PieceColor = .NONE;
@@ -346,7 +347,7 @@ is_draw :: (using board : *Board) -> bool {
   // insufficient material to checkmate other king
   {
     using PieceType;
-    piece_counts, other_piece_counts : [6] int;
+    piece_counts, other_piece_counts : [NUM_PIECE_TYPES] int;
     for *square : squares {
       if square.piece != EMPTY_PIECE {
         if square.piece.color == turn
