@@ -33,6 +33,10 @@ Square :: struct {
   loc : Location      = .{0, 0};
 }
 
+operator == :: (s1: Square, s2 : Square) -> bool {
+  return s1.piece == s2.piece && s1.loc == s2.loc;
+}
+
 empty :: (using square : Square) -> bool {
   return piece  == EMPTY_PIECE;
 }

@@ -1,7 +1,6 @@
 #import "Basic";
 // Window :: #import "Window_Creation"; // @todo: move back to GLFW for control over # samples/pixel
 #import "glfw";
-#import "GL";   // OpenGL, doesn't need a namespace because most functions are in a global struct anyway
 File :: #import "File"; // for reading files
 
 STB :: #import "stb_image"; // for reading pngs into memory
@@ -240,24 +239,6 @@ get_vert_frag_paths :: (basename : string, folder : string = "shaders") -> (stri
   return vert_path, frag_path;
 }
 
-compile_shader :: (shader_type : u32, source_path : string) -> u32 {
-  using gl;
-  shader := glCreateShader(shader_type);
-  shader_text, file_success := File.read_entire_file(source_path, true);
-  defer free(shader_text);
-  if !file_success error("There was an error reading the shader: %\n", source_path);
-
-  _glShaderSource(shader, shader_text);
-  glCompileShader(shader);
-  compile_success : s32;
-  glGetShaderiv(shader, GL_COMPILE_STATUS, *compile_success);
-  if !compile_success {
-    DumpShaderInfoLog(shader, source_path);
-    error("Shader compilation error. Exiting.\n");
-  }
-  return shader;
-};
-
 main :: () {
   version_major, version_minor :: 3, 1; // @note: OpenGL version hardcoded
   startup_timer : Timer;
@@ -439,9 +420,6 @@ main :: () {
 
 
   // TEXTURES
-  // Reading in 1 texture takes 100 ms because OpenGL I guess.
-  //   Doesn't matter as long as I only have one big texture map for all the pieces.
-
   texture : u32; // spritesheet of pieces
   {
     width, height, nchannels : s32;
