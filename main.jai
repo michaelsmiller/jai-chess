@@ -1,7 +1,8 @@
 #import "Basic";
-// Window :: #import "Window_Creation"; // @todo: move back to GLFW for control over # samples/pixel
-#import "glfw";
 File :: #import "File"; // for reading files
+
+Window :: #import "Window_Creation";
+Input  :: #import "Input";
 
 STB :: #import "stb_image"; // for reading pngs into memory
 
@@ -14,6 +15,7 @@ window_size :: Vector2(s32).{800, 800};
 
 // Global state
 //
+window_should_close := false;
 toggle           := false;      // for debugging
 to_redraw_pieces := false;      // Whether we need to recreate piece vertices and redraw this frame.
 nframes          : s64 = 0;     // number of frames that have passed up to this point
@@ -39,7 +41,7 @@ pprint :: (name : string, message : string, print_args : ..Any) #expand {
 }
 error :: (message : string, print_args : ..Any) #expand {
   pprint("ERROR", message, ..print_args);
-  glfwTerminate();
+  // glfwTerminate();
   exit(1);
 }
 warning :: (message : string, print_args : ..Any) #expand {
@@ -53,12 +55,12 @@ do_end_of_turn_logic :: () {
   print("% to move\n", board.turn);
 }
 
-mouse_button_callback :: (window : *GLFWwindow) #c_call {
+mouse_button_callback :: () #c_call {
   new_context : Context;
   push_context new_context {
     if true {
       x, y : float64; // pixels, graphically arranged
-      glfwGetCursorPos(window, *x, *y);
+      // glfwGetCursorPos(window, *x, *y);
       y = window_size.y - 1 - y; // make coordinates cartesian
 
       // @todo: make window_size a mutable variable that updates with the changing window
@@ -132,18 +134,24 @@ mouse_button_callback :: (window : *GLFWwindow) #c_call {
   }
 }
 
-key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, mods : s32) #c_call {
+key_callback :: (event : *Input.Event) #c_call {
   new_context : Context;
   push_context new_context {
-    if action == GLFW_RELEASE || action == GLFW_REPEAT return;
+    pressed := event.key_pressed != 0;
+    if !pressed || event.repeat return;
+
+    key := event.key_code;
+    key_char := cast(u32)key;
 
     // @note: important that this be as early as possible, so that one can always quit
-    if key == GLFW_KEY_ESCAPE {
-      glfwSetWindowShouldClose(window, GLFW_TRUE);
+    assert(event.type == .KEYBOARD || event.type == .TEXT_INPUT);
+    if event.key_code == .ESCAPE {
+      window_should_close = true;
       return;
     }
     if input_state == .PROMOTE {
-      s := to_string(glfwGetKeyName(key, scancode));
+      // s := to_string(glfwGetKeyName(key, scancode));
+      s : string = "temp"; // @todo: fix this
       if s.count != 1 return;
       c := s[0];
       // uppercase if shift pressed
@@ -169,20 +177,20 @@ key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, 
       return;
     }
 
-    if key == GLFW_KEY_ENTER {
+    if key == .ENTER {
       toggle = !toggle;
       print("Toggle boolean is now %\n", toggle);
     }
-    else if key == GLFW_KEY_SPACE {
+    else if key == .SPACEBAR {
       color := board.turn;
       other := other_color(color);
       print("FOR DEBUGGING: changing color to move: (% -> %)\n", color, other);
       board.turn = other;
     }
-    else if key == GLFW_KEY_F {
+    else if key_char == #char "f" {
       if nframes > time_sample_rate print("Respects paid: % fps\n", cast(int)framerate);
     }
-    else if key == GLFW_KEY_U {
+    else if key_char == #char "u" {
       can_undo := board.move_history.count > 0;
       if !can_undo {
         print("Cannot undo because there have been no moves!\n");
@@ -201,10 +209,13 @@ key_callback :: (window : *GLFWwindow, key : s32, scancode : s32, action : s32, 
       builder : String_Builder;
       init_string_builder(*builder, 4);
       defer free_buffers(*builder);
-      if mods & GLFW_MOD_CONTROL append(*builder, "Ctrl-");
-      if mods & GLFW_MOD_ALT     append(*builder, "Alt-");
-      if mods & GLFW_MOD_SHIFT   append(*builder, "Shift-");
-      append(*builder, tprint("%\n", to_string(glfwGetKeyName(key, scancode))));
+
+      flags := event.modifier_flags;
+      if flags.ctrl_pressed   append(*builder, "Ctrl-");
+      if flags.alt_pressed    append(*builder, "Alt-");
+      if flags.shift_pressed  append(*builder, "Shift-");
+      // append(*builder, tprint("%\n", to_string(glfwGetKeyName(key, scancode))));
+      append(*builder, tprint("%\n", cast(u8)key_char));
       print("Pressed: ");
       print(builder_to_string(*builder, __temporary_allocator));
     }
@@ -244,22 +255,14 @@ main :: () {
   startup_timer : Timer;
   start_timer(*startup_timer);
 
-  if !glfwInit() error("glfwInit() failed");
+  // if !glfwInit() error("glfwInit() failed");
   NSAMPLES : s32 : 4;
-  glfwWindowHint(GLFW_SAMPLES, NSAMPLES); // for super-sampling!
-  window := glfwCreateWindow(window_size.x, window_size.y, "Chess", null, null);
-  if !window error("Couldn't open GLFW window.");
-  glfwMakeContextCurrent(window);
-
-  // callbacks
-  glfwSwapInterval(1);
-
-  print("Successfully created window of size % pixels\n", window_size);
-  {
-    ns := glfwGetWindowAttrib(window, GLFW_SAMPLES);
-    if ns != NSAMPLES
-      warning("Number of samples is % instead of %, system to blame probably\n", ns, NSAMPLES);
-  }
+  print("Creating window of size %, %\n", window_size.x, window_size.y);
+  window := Window.create_window(window_size.x, window_size.y, "Chess");
+  // glfwWindowHint(GLFW_SAMPLES, NSAMPLES); // for super-sampling!
+  // window := glfwCreateWindow(window_size.x, window_size.y, "Chess", null, null);
+  // if !window error("Couldn't open GLFW window.");
+  // print("Successfully created window of size % pixels\n", window_size);
 
   // Should correspond exactly with what is fed to vertex buffer
   // @todo: make some functions to easily load into vertex buffer given fewer inputs
@@ -447,7 +450,8 @@ main :: () {
   sleep_milliseconds(10); // necessary for timer not to be set off
   stop_timer(*startup_timer);
   print("Startup took % ms\n", get_millis(*startup_timer));
-  while !glfwWindowShouldClose(window) { // game loop
+  // while !glfwWindowShouldClose(window) { // game loop
+  while !window_should_close { // game loop
     defer nframes += 1;
 
     // Framerate calculation, done every few frames for a good average
@@ -469,14 +473,21 @@ main :: () {
     }
 
     // HANDLE INPUT
-    glfwPollEvents(); // automatically invokes the key_callback() function
+    Input.update_window_events();
+    for event : Input.events_this_frame {
+      if event.type == .QUIT window_should_close = true;
+      if event.type == .KEYBOARD {
+        if event.key_pressed != 0 && event.key_code == .ESCAPE window_should_close = true;
+        // @todo: put in input code here
+      }
+    }
 
     // SIMULATE
     // @todo: make a board state update when there is a move registered
 
     // GRAPHICS
     width, height : s32;
-    glfwGetWindowSize(window, *width, *height);
+    // glfwGetWindowSize(window, *width, *height);
 
     if to_redraw_pieces {
       // @todo
@@ -486,9 +497,9 @@ main :: () {
     // draw to backbuffer
     // @todo
 
-    glfwSwapBuffers(window);
+    // glfwSwapBuffers(window);
     reset_temporary_storage(); // allows us to allocate temporary stuff without fear every frame
   }
-  glfwTerminate();
+  // glfwTerminate();
   print("Program exited and shut down correctly\n");
 }
