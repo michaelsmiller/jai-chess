@@ -3,6 +3,8 @@ File :: #import "File"; // for reading files
 
 Window :: #import "Window_Creation";
 Input  :: #import "Input";
+#import "GL";
+X11 :: #import "X11";
 
 STB :: #import "stb_image"; // for reading pngs into memory
 
@@ -48,6 +50,40 @@ warning :: (message : string, print_args : ..Any) #expand {
   pprint("WARNING", message, ..print_args);
 }
 
+check_framebuffer_status :: (err_on_failure := true) -> (bool, GLenum) {
+  e := glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if e == GL_FRAMEBUFFER_COMPLETE return false, e;
+
+  if e == {
+    case GL_FRAMEBUFFER_UNDEFINED;               print("ERROR: GL_FRAMEBUFFER_UNDEFINED\n");
+    case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT;   print("ERROR: GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT\n");
+    case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT;   print("ERROR: GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT\n");
+    case GL_FRAMEBUFFER_UNSUPPORTED;             print("ERROR: GL_FRAMEBUFFER_UNSUPPORTED\n");
+    case GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE;  print("ERROR: GL_FRAMEBUFFER_INCOMPLETE_MULTISAMPLE\n");
+
+    case; print("FRAMEBUFFER STATUS: % (add to check_framebuffer_status())\n", to_hex(e));
+  }
+  if err_on_failure exit(1);
+  return true, e;
+}
+
+check_gl_error :: (err_on_failure := true) -> (bool, GLenum) {
+  e := glGetError();
+  if e == GL_NO_ERROR return false, e;
+
+  if e == {
+    case GL_INVALID_ENUM;                  print("ERROR: GL_INVALID_ENUM\n");
+    case GL_INVALID_VALUE;                 print("ERROR: GL_INVALID_VALUE\n");
+    case GL_INVALID_OPERATION;             print("ERROR: GL_INVALID_OPERATION\n");
+    case GL_INVALID_FRAMEBUFFER_OPERATION; print("ERROR: GL_INVALID_FRAMEBUFFER_OPERATION\n");
+                                           check_framebuffer_status(err_on_failure);
+
+    case; print("GL ERROR: % (add to check_gl_error())\n", to_hex(e));
+  }
+  if err_on_failure exit(1);
+  return true, e;
+}
+
 // callbacks
 do_end_of_turn_logic :: () {
   if is_checkmate(*board) print("CHECKMATE: % wins!\n", other_color(board.turn));
@@ -56,9 +92,10 @@ do_end_of_turn_logic :: () {
 }
 
 mouse_button_callback :: () #c_call {
+  using gl;
   new_context : Context;
   push_context new_context {
-    if true {
+    if input_state == .DEFAULT {
       x, y : float64; // pixels, graphically arranged
       // glfwGetCursorPos(window, *x, *y);
       y = window_size.y - 1 - y; // make coordinates cartesian
@@ -250,6 +287,71 @@ get_vert_frag_paths :: (basename : string, folder : string = "shaders") -> (stri
   return vert_path, frag_path;
 }
 
+set_uniform :: (program : GLuint, cname : *u8, value : $T) {
+  using gl;
+  loc := glGetUniformLocation(program, cname);
+  if loc < 0 {
+    name := to_string(cname);
+    error("location of uniform '%' not found. Might not be active.\n", name);
+  }
+
+  #if T == [2] s32 {
+    glUniform2i(loc, value[0], value[1]);
+  }
+  else #if T == Vector2(s32) {
+    glUniform2i(loc, value.x, value.y);
+  }
+  else #if T == float {
+    glUniform1f(loc, value);
+  }
+  else #if T == [2] float {
+    glUniform2f(loc, value[0], value[1]);
+  }
+  else #if T == [3] float {
+    glUniform3f(loc, value[0], value[1], value[2]);
+  }
+  else #if T == Vector3(float) {
+    glUniform3f(loc, value.x, value.y, value.z);
+  }
+  else #if T == [4] float {
+    glUniform4f(loc, value[0], value[1], value[2], value[3]);
+  }
+  else #if T == [] s32 {
+    glUniform1iv(loc, cast(GLsizei)value.count, value.data);
+  }
+  else #if T == [] Vector2(s32) {
+    glUniform2iv(loc, cast(GLsizei)value.count, cast(*s32)value.data);
+  }
+  else {
+    error("type '%' not supported yet!\nShould probably add it\n", T);
+  }
+}
+
+compile_shader :: (shader_type : GLenum, source_path : string) -> GLuint {
+  using gl;
+  shader := glCreateShader(shader_type);
+  shader_text, file_success := File.read_entire_file(source_path, true);
+  defer free(shader_text);
+  if !file_success error("There was an error reading the shader: %\n", source_path);
+
+  _glShaderSource(shader, shader_text);
+  glCompileShader(shader);
+  compile_success : GLint;
+  glGetShaderiv(shader, GL_COMPILE_STATUS, *compile_success);
+  if !compile_success {
+    DumpShaderInfoLog(shader, source_path);
+    error("Shader compilation error. Exiting.\n");
+  }
+  return shader;
+};
+
+// 1. Create a known map of function-name -> offset
+// 2. Make function just add the offset to *gl
+glGetProcAddress :: (proc : *u8) -> *void #c_call {
+  base := cast(*void)(*gl);
+  return base;
+}
+
 main :: () {
   version_major, version_minor :: 3, 1; // @note: OpenGL version hardcoded
   startup_timer : Timer;
@@ -259,20 +361,40 @@ main :: () {
   NSAMPLES : s32 : 4;
   print("Creating window of size %, %\n", window_size.x, window_size.y);
   window := Window.create_window(window_size.x, window_size.y, "Chess");
+  Input.update_window_events(); for Input.events_this_frame continue;
   // glfwWindowHint(GLFW_SAMPLES, NSAMPLES); // for super-sampling!
   // window := glfwCreateWindow(window_size.x, window_size.y, "Chess", null, null);
   // if !window error("Couldn't open GLFW window.");
   // print("Successfully created window of size % pixels\n", window_size);
+
+  glx_context, gl_fbc := glx_create_context(version_major, version_minor, false, true);
+  glx_window := X11.glXCreateWindow(X11.x_global_display, gl_fbc, window, null);
+  X11.glXMakeCurrent(X11.x_global_display, glx_window, glx_context);
+  gl_load(*gl, X11.glXGetProcAddress); // Makes OpenGL functions available
+  gl_enable_debug_output(break_on_error=true);
+  using gl;
+
+  // OpenGL defaults here:
+  {
+    major, minor := gl_get_version();
+    print("OpenGL version: %.%\n", major, minor);
+    assert(major == version_major && minor == version_minor);
+  }
+  print("Loaded OpenGL instance\n");
+  print(" Vendor:   %\n", to_string(glGetString(GL_VENDOR)));
+  print(" Renderer: %\n", to_string(glGetString(GL_RENDERER)));
+  glEnable(GL_MULTISAMPLE);
+  glClearColor(0.2, 0.2, 0.2, 1.); // a pleasant gray
 
   // Should correspond exactly with what is fed to vertex buffer
   // @todo: make some functions to easily load into vertex buffer given fewer inputs
   SquareVertex :: struct {
     x, y : float;        // coords
     tx, ty : float;      // texture coordinates
-    ix, iy : s32;      // index of what square this is on
+    ix, iy : GLint;      // index of what square this is on
   }
 
-  make_vertex :: inline (x : float, y : float, tx : float, ty : float, ix : s32, iy : s32) -> SquareVertex {
+  make_vertex :: inline (x : float, y : float, tx : float, ty : float, ix : GLint, iy : GLint) -> SquareVertex {
     v : SquareVertex;
     v.x = x;
     v.y = y;
@@ -291,7 +413,7 @@ main :: () {
   nsquares :: nsquare_width*nsquare_height;
 
   vertices       : [4*nsquares] SquareVertex; // 4 vertices per square
-  vertex_indices : [6*nsquares] u32; // 2 triangles per square, each has 3 vertices
+  vertex_indices : [6*nsquares] GLuint; // 2 triangles per square, each has 3 vertices
   ivert := 0;
   for i : 0..square_dim.x-1 {
     for j : 0..square_dim.y-1 {
@@ -305,8 +427,8 @@ main :: () {
       w  := 2 / cast(float) square_dim.x;
       h  := 2 / cast(float) square_dim.y;
 
-      ix := cast(s32) i;
-      iy := cast(s32) (square_dim.y - j - 1); // flip y axis back for square indices
+      ix := cast(GLint) i;
+      iy := cast(GLint) (square_dim.y - j - 1); // flip y axis back for square indices
       itri1 := ivert * 4;
       // @note: OpenGL texture coordinates are NOT flipped on y for some reason
       //        so the top of an image has texture coordinate 1, not 0.
@@ -405,7 +527,59 @@ main :: () {
   print("Created % pieces, % vertices, % indices.\n", num_pieces(*board), piece_vertices.count, piece_indices.count);
   assert(num_pieces(*board) == num_pieces(*board, .WHITE) + num_pieces(*board, .BLACK));
 
+  VertexSet :: struct {
+    vao : GLuint; // vertex array object
+    ebo : GLuint; // element buffer object
+    vbo : GLuint; // vertex buffer object
+  }
+  create_vertex_set :: inline (indices : [] u32, vertices : [] $T) -> VertexSet {
+    using gl;
+    vs : VertexSet;
+    // vao            : GLuint; // output
+    // element_buffer : GLuint; // storage for triangle vertex indices
+    // vertex_buffer  : GLuint; // storage for square vertices
+    glGenVertexArrays(1, *vs.vao);
+    glBindVertexArray(vs.vao);
+
+    glGenBuffers(1, *vs.ebo);
+    glGenBuffers(1, *vs.vbo);
+
+    // @todo: replace GL_STATIC_DRAW with a variable so that we can add and remove pieces at will
+    update_vs(*vs, indices, vertices);
+    return vs;
+  }
+
+  update_vs :: (vs : *VertexSet, indices : [] u32, vertices : [] $T) {
+    using gl;
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vs.ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.count*size_of(u32), indices.data, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, vs.vbo);
+    glBufferData(GL_ARRAY_BUFFER, vertices.count * size_of(T), vertices.data, GL_STATIC_DRAW);
+  }
+
+  compile_shader_program :: (basename : string) -> GLuint {
+    using gl;
+    program := glCreateProgram();
+    print("Compiling and linking '%' shaders ...", basename);
+    vert_path, frag_path := get_vert_frag_paths(basename);
+    vertex_shader := compile_shader(GL_VERTEX_SHADER, vert_path);
+    fragment_shader := compile_shader(GL_FRAGMENT_SHADER, frag_path);
+    defer glDeleteShader(vertex_shader);
+    defer glDeleteShader(fragment_shader);
+
+    glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+    glLinkProgram(program);
+    print(" success!\n");
+    return program;
+  }
+
+  board_vs := create_vertex_set(vertex_indices, vertices);
+  glBindVertexArray(board_vs.vao);
+  board_program := compile_shader_program("board");
+
   // UNIFORMS
+  glUseProgram(board_program);
   BoardShaderUniforms :: struct {
       white_color  := Color.{0.8, 0.8, 0.8};
       black_color  := Color.{0.4, 0.4, 0.4};
@@ -419,11 +593,75 @@ main :: () {
   }
   board_look : BoardShaderUniforms;
 
+  set_uniform(board_program, "blackColor",  board_look.black_color);
+  set_uniform(board_program, "whiteColor",  board_look.white_color);
+  set_uniform(board_program, "borderColor", board_look.border_color);
+  set_uniform(board_program, "borderWidth", board_look.border_width);
+  set_uniform(board_program, "selectionColor1", board_look.selection_color1);
+  set_uniform(board_program, "selectionColor2", board_look.selection_color2);
+  set_uniform(board_program, "selectionWidth", board_look.selection_width);
+  set_uniform(board_program, "squareDim",   square_dim);
+  set_uniform(board_program, "t",           cast(float) 0.);
+  set_uniform(board_program, "selected", array_view(square_selections, 0));
   print("Set uniforms successfully.\n");
 
+  // ATTRIBUTES
+  { // attributes for board_program
+    glBindVertexArray(board_vs.vao);
+    glUseProgram(board_program);
+    // @note: need glVertexAttribIPointer when working with integer types, otherwise
+    //        everything gets implicitly casted to float for some reason...
+    offset : *SquareVertex : null; // giving OpenGL the right offsets (basically relative pointers)
+    vsize : GLuint = size_of(SquareVertex);
+    vi : u32 = 0;
+    // The vertices and their data
+    glEnableVertexAttribArray(vi);
+    glVertexAttribPointer(vi, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.x);
+    vi += 1;
+    // The texture coordinates
+    glEnableVertexAttribArray(vi);
+    glVertexAttribPointer(vi, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tx);
+    vi += 1;
+    // The indices of the square
+    glEnableVertexAttribArray(vi);
+    glVertexAttribIPointer(vi, 2, GL_INT, vsize, cast(*void) *offset.ix);
+    vi += 1;
+  }
+
+  // PIECE program
 
   // TEXTURES
-  texture : u32; // spritesheet of pieces
+  // Reading in 1 texture takes 100 ms because OpenGL I guess.
+  //   Doesn't matter as long as I only have one big texture map for all the pieces.
+
+  // allocate buffers and shit
+  piece_vs := create_vertex_set(piece_indices, piece_vertices);
+  glBindVertexArray(piece_vs.vao);
+  piece_program := compile_shader_program("piece");
+
+  { // attributes for piece_program
+    glBindVertexArray(piece_vs.vao); // @note: needed, and not too sure why
+    glUseProgram(piece_program);
+
+    // @note: need glVertexAttribIPointer when working with integer types, otherwise
+    //        everything gets implicitly casted to float for some reason...
+    offset : *PieceVertex : null; // giving OpenGL the right offsets (basically relative pointers)
+    vsize : GLuint = size_of(PieceVertex);
+    // Color
+    glEnableVertexAttribArray(0);
+    glVertexAttribIPointer(0, 1, GL_INT, vsize, cast(*void) *offset.color);
+    // The type
+    glEnableVertexAttribArray(1);
+    glVertexAttribIPointer(1, 1, GL_INT, vsize, cast(*void) *offset.type);
+
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.pos);
+    // position of piece on board
+    glEnableVertexAttribArray(3);
+    glVertexAttribPointer(3, 2, GL_FLOAT, xx false, vsize, cast(*void) *offset.tex);
+  }
+
+  texture : GLuint; // spritesheet of pieces
   {
     width, height, nchannels : s32;
 
@@ -437,6 +675,26 @@ main :: () {
       error("error loading '%': expected % color channels, got %\n", image_path, 4, nchannels);
     defer free(data);
     print("Successfully Loaded % x % image w/ % color channels into memory\n", width, height, nchannels);
+
+    glGenTextures(1, *texture); // only one texture for now
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    // @note: internal format is what is used in the fragment shaders
+    { // texture settings
+      // Make mipmapped texture look better
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0); // no mipmaps, INCREASE IF NEED THEM;
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); // bilinear
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); // bilinear
+      // trilinear filtering only makes result look worse without additional anti-aliasing techniques for minification
+    }
+
+    // @note: this glTexImage2D is technically specifying the 0th mipmap level
+    glTexImage2D  (GL_TEXTURE_2D, 0, GL_RGBA, xx width, xx height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    if glGetError() != GL_NO_ERROR error("There was an OpenGL texture error!\n");
+    // glGenerateMipmap(GL_TEXTURE_2D); // doubles loading time, should be removed if mipmaps not needed
+
     print("Created a (%, %) texture\n", width, height);
   }
 
@@ -470,6 +728,8 @@ main :: () {
     {
       stop_timer(*total_timer); // don't start total_timer again
       ftime : float = get_seconds(*total_timer); // in seconds;
+      glUseProgram(board_program); // Need to be using board program, don't know why
+      set_uniform(board_program, "t",  ftime);
     }
 
     // HANDLE INPUT
@@ -490,12 +750,32 @@ main :: () {
     // glfwGetWindowSize(window, *width, *height);
 
     if to_redraw_pieces {
-      // @todo
+      // print("Redrawing pieces this frame\n");
+      update_piece_vertices(*piece_vertices, *piece_indices); // updates vertices using board
+      update_vs(*piece_vs, piece_indices, piece_vertices);    // reallocates and copies opengl objects.
+
       to_redraw_pieces = false;
     }
 
+    if selection_changed {
+      set_uniform(board_program, "selected", array_view(square_selections, 0));
+      selection_changed = false;
+    }
+
     // draw to backbuffer
-    // @todo
+    glClear(GL_COLOR_BUFFER_BIT);
+    { // draw board
+      glClearColor(1, 1, 1, 0);
+      glBindVertexArray(board_vs.vao); // have to bind every frame before drawing
+      glUseProgram(board_program); // board_program is a shading board_program, specifically
+      glDrawElements(GL_TRIANGLES, xx vertex_indices.count, GL_UNSIGNED_INT, xx 0);
+      check_gl_error();
+    }
+    { // draw pieces
+      glBindVertexArray(piece_vs.vao); // have to bind every frame before drawing
+      glUseProgram(piece_program); // board_program is a shading board_program, specifically
+      glDrawElements(GL_TRIANGLES, xx piece_indices.count, GL_UNSIGNED_INT, xx 0);
+    }
 
     // glfwSwapBuffers(window);
     reset_temporary_storage(); // allows us to allocate temporary stuff without fear every frame
